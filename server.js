@@ -134,17 +134,17 @@ app.post("/webhook", async (req, res) => {
 
     const MessagingResponse = require("twilio").twiml.MessagingResponse;
     const twiml = new MessagingResponse();
+
     if (reply.length > 1500) {
-      const parts = reply.match(/.{1, 1500}/g);
-      parts.forEach(part => {
-        twiml.message(part);
-      });
+      const parts = reply.match(/.{1,1500}/g);
+      parts.forEach(part => twiml.message(part));
     } else {
       twiml.message(reply);
     }
-    res.writeHead(200, {"Content-Type": "text/xml"});
-    res.end(twiml.toString());
-});
+
+// ✅ THIS is the safer way
+    res.type("text/xml");
+    res.send(twiml.toString());
   } catch (error) {
     console.error(error.response?.data || error.message);
 
