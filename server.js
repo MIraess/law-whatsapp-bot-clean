@@ -36,15 +36,15 @@ function getModePrompt(message) {
     return {
       role: "system",
       content:
-        "You are a Nigerian law lecturer and examiner. Answer strictly using IRAC:
--Issue
-Rule (state relevant legal principles and Nigerian authorities where possible)
-Application (apply law clearly to facts or scenario)
-Conclusion
-Your tone must be formal, precise, and exam-standard.
-Where applicable, reference Nigerian cases, statutes, or common law principles used in Nigerian courts.
-Avoid vague explanations. Be direct and analytical.
-End every answer with: "This is for educational purposes only, not legal advice."",
+        "You are a Nigerian law lecturer and examiner. Answer strictly using IRAC:\n" +
+        "- Issue\n" +
+        "- Rule (state relevant legal principles and Nigerian authorities where possible)\n" +
+        "- Application (apply law clearly to facts or scenario)\n" +
+        "- Conclusion\n" +
+        "Your tone must be formal, precise, and exam-standard.\n" +
+        "Where applicable, reference Nigerian cases, statutes, or common law principles used in Nigerian courts.\n" +
+        "Avoid vague explanations. Be direct and analytical.\n" +
+        "End every answer with: 'This is for educational purposes only, not legal advice.'",
     };
   }
 
@@ -52,14 +52,11 @@ End every answer with: "This is for educational purposes only, not legal advice.
     return {
       role: "system",
       content:
-        "You are a Nigerian law tutor.
-Explain legal concepts in very simple terms as if teaching a 100-level law student.
-Use:
-- clear language
-- relatable examples
-- step-by-step explanations
-Avoid unnecessary legal jargon
-End every answer with 'This is for educational purposes only, not legal advice.'",
+        "You are a Nigerian law tutor.\n" +
+        "Explain legal concepts in very simple terms as if teaching a 100-level law student.\n" +
+        "Use clear language, relatable examples, and step-by-step explanations.\n" +
+        "Avoid unnecessary legal jargon.\n" +
+        "End every answer with: 'This is for educational purposes only, not legal advice.'",
     };
   }
 
@@ -67,32 +64,32 @@ End every answer with 'This is for educational purposes only, not legal advice.'
     return {
       role: "system",
       content:
-        "You are a Nigerian lawyer in a moot court competition.
-Present strong, persuasive legal arguments.
-Structure your answer like courtroom submissions:
-- Clear position
-- Supporting legal principles
-- Authorities where relevant
-- Convincing reasoning
-Sound confident, logical, and assertive.
-End every answer with 'This is for educational purposes only, not legal advice.'",
+        "You are a Nigerian lawyer in a moot court competition.\n" +
+        "Present strong, persuasive legal arguments.\n" +
+        "Structure your answer like courtroom submissions:\n" +
+        "- Clear position\n" +
+        "- Supporting legal principles\n" +
+        "- Authorities where relevant\n" +
+        "- Convincing reasoning\n" +
+        "Sound confident, logical, and assertive.\n" +
+        "End every answer with: 'This is for educational purposes only, not legal advice.'",
     };
   }
 
   return {
     role: "system",
     content:
-      "You are a Nigerian law tutor. Explain clearly and concisely. Always end with 'for educational purposes only, not legal advice.'",
+      "You are a Nigerian law tutor. Explain clearly and concisely. Always end with 'This is for educational purposes only, not legal advice.'",
   };
 }
 
 app.post("/webhook", async (req, res) => {
-  let userMessage = req.body.Body;
+  let userMessage = req.body.Body || "";
   const userNumber = req.body.From;
 
-  // 🔒 Rate limiting check
+  // 🔒 Rate limiting
   if (isRateLimited(userNumber)) {
-    res.set("Content-Type", "text/xml");
+    res.type("text/xml");
     return res.send(`
       <Response>
         <Message>Please slow down. Try again in a few seconds.</Message>
@@ -106,14 +103,15 @@ app.post("/webhook", async (req, res) => {
 
   const systemPrompt = getModePrompt(userMessage);
 
-  userMessage = userMessage.replace(/\/exam|\/simple|\/argue/, "").trim();
+  // ✅ Clean command from message
+  userMessage = userMessage.replace(/^\/\w+\s*/, "").trim();
 
   try {
     const aiResponse = await axios.post(
       "https://api.openai.com/v1/chat/completions",
       {
         model: "gpt-4o-mini",
-        max_tokens: 300,
+        max_tokens: 800,
         messages: [
           systemPrompt,
           {
@@ -130,18 +128,32 @@ app.post("/webhook", async (req, res) => {
       }
     );
 
-    const reply = aiResponse.data.choices[0].message.content;
+    let reply = aiResponse.data.choices[0].message.content;
 
-    res.set("Content-Type", "text/xml");
-    res.send(`
-      <Response>
-        <Message>${reply}</Message>
-      </Response>
-    `);
+    // 🛡️ Safety fallback
+    if (!reply) {
+      reply = "Sorry, something went wrong. Please try again.";
+    }
+
+    const MessagingResponse = require("twilio").twiml.MessagingResponse;
+    const twiml = new MessagingResponse();
+
+    // ✂️ Split long messages
+    if (reply.length > 1500) {
+      const parts = reply.match(/.{1,1500}/g);
+      parts.forEach(part => twiml.message(part));
+    } else {
+      twiml.message(reply);
+    }
+
+    // ✅ Correct TwiML response
+    res.type("text/xml");
+    res.send(twiml.toString());
+
   } catch (error) {
     console.error(error.response?.data || error.message);
 
-    res.set("Content-Type", "text/xml");
+    res.type("text/xml");
     res.send(`
       <Response>
         <Message>Sorry, something went wrong.</Message>
