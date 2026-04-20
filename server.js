@@ -113,7 +113,7 @@ app.post("/webhook", async (req, res) => {
       "https://api.openai.com/v1/chat/completions",
       {
         model: "gpt-4o-mini",
-        max_tokens: 300,
+        max_tokens: 800,
         messages: [
           systemPrompt,
           {
@@ -132,12 +132,19 @@ app.post("/webhook", async (req, res) => {
 
     const reply = aiResponse.data.choices[0].message.content;
 
-    res.set("Content-Type", "text/xml");
-    res.send(`
-      <Response>
-        <Message>${reply}</Message>
-      </Response>
-    `);
+    const MessagingResponse = require("twilio").twiml.MessagingResponse;
+    const twiml = new MessagingResponse();
+    if (reply.length > 1500) {
+      const parts = reply.match(/.{1, 1500}/g);
+      parts.forEach(part => {
+        twiml.message(part);
+      });
+    } else {
+      twiml.message(reply);
+    }
+    res.writeHead(200, {"Content-Type": "text/xml"});
+    res.end(twiml.toString());
+});
   } catch (error) {
     console.error(error.response?.data || error.message);
 
