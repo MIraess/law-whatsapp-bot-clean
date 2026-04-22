@@ -6,6 +6,11 @@ const fs = require("fs");
 const app = express();
 app.use(express.urlencoded({ extended: true }));
 
+// ✅ TEST ROUTE (VERY IMPORTANT)
+app.get("/", (req, res) => {
+  res.send("Server is alive 🔥");
+});
+
 // 🧠 Simple in-memory rate limiter
 const userLimits = {};
 
@@ -19,7 +24,6 @@ function isRateLimited(user) {
 
   const diff = now - userLimits[user].time;
 
-  // reset after 30 seconds
   if (diff > 30000) {
     userLimits[user] = { count: 1, time: now };
     return false;
@@ -27,7 +31,7 @@ function isRateLimited(user) {
 
   userLimits[user].count++;
 
-  return userLimits[user].count > 5; // max 5 messages per 30 seconds
+  return userLimits[user].count > 5;
 }
 
 // 🧠 Mode handler
@@ -83,7 +87,11 @@ function getModePrompt(message) {
   };
 }
 
+// 🔥 WEBHOOK ROUTE
 app.post("/webhook", async (req, res) => {
+  console.log("🔥 Webhook hit!");
+  console.log("Body:", req.body);
+
   let userMessage = req.body.Body || "";
   const userNumber = req.body.From;
 
@@ -103,7 +111,7 @@ app.post("/webhook", async (req, res) => {
 
   const systemPrompt = getModePrompt(userMessage);
 
-  // ✅ Clean command from message
+  // ✅ Clean command
   userMessage = userMessage.replace(/^\/\w+\s*/, "").trim();
 
   try {
@@ -128,9 +136,10 @@ app.post("/webhook", async (req, res) => {
       }
     );
 
+    console.log("✅ AI RESPONSE RECEIVED");
+
     let reply = aiResponse.data.choices[0].message.content;
 
-    // 🛡️ Safety fallback
     if (!reply) {
       reply = "Sorry, something went wrong. Please try again.";
     }
@@ -138,7 +147,7 @@ app.post("/webhook", async (req, res) => {
     const MessagingResponse = require("twilio").twiml.MessagingResponse;
     const twiml = new MessagingResponse();
 
-    // ✂️ Split long messages
+    // ✂️ Split long responses
     if (reply.length > 1500) {
       const parts = reply.match(/.{1,1500}/g);
       parts.forEach(part => twiml.message(part));
@@ -146,12 +155,11 @@ app.post("/webhook", async (req, res) => {
       twiml.message(reply);
     }
 
-    // ✅ Correct TwiML response
     res.type("text/xml");
     res.send(twiml.toString());
 
   } catch (error) {
-    console.error(error.response?.data || error.message);
+    console.error("❌ ERROR:", error.response?.data || error.message);
 
     res.type("text/xml");
     res.send(`
@@ -162,6 +170,7 @@ app.post("/webhook", async (req, res) => {
   }
 });
 
+// 🚀 START SERVER
 app.listen(3000, () => {
   console.log("Server running on port 3000");
 });
