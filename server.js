@@ -65,7 +65,7 @@ function detectLanguage(message) {
   return "english";
 }
 
-// 🧠 Mode detection (NO MORE COMMANDS)
+// 🧠 Mode detection
 function detectMode(message) {
   const msg = message.toLowerCase();
 
@@ -76,12 +76,30 @@ function detectMode(message) {
   return "default";
 }
 
-// 🧠 Smart clarification trigger
+// 🧠 FIXED Smart clarification
 function needsClarification(message) {
-  const short = message.trim().split(" ").length < 3;
-  const vagueWords = ["explain", "law", "case", "contract"];
+  const msg = message.toLowerCase().trim();
 
-  return short || vagueWords.includes(message.toLowerCase());
+  // ✅ Greetings
+  const greetings = ["hi", "hello", "hey", "good morning", "good afternoon", "good evening"];
+  if (greetings.includes(msg)) return false;
+
+  // ✅ Legal keywords
+  const legalKeywords = [
+    "negligence", "contract", "tort", "crime",
+    "offer", "acceptance", "consideration",
+    "liability", "damages", "battery", "assault"
+  ];
+  if (legalKeywords.includes(msg)) return false;
+
+  // ✅ Short meaningful phrases (2 words)
+  if (msg.split(" ").length === 2) return false;
+
+  // ❗ Truly vague
+  const vagueWords = ["law", "case", "help", "explain"];
+  if (vagueWords.includes(msg)) return true;
+
+  return false;
 }
 
 // 🧠 Prompt builder
@@ -120,7 +138,7 @@ app.post("/webhook", async (req, res) => {
   let userMessage = req.body.Body || "";
   const userNumber = req.body.From;
 
-  // 💸 Daily limit check
+  // 💸 Daily limit
   if (isDailyLimited(userNumber)) {
     res.type("text/xml");
     return res.send(`
@@ -140,15 +158,28 @@ app.post("/webhook", async (req, res) => {
     `);
   }
 
-  // 📊 Logging
+  // 📊 Log
   fs.appendFileSync("logs.txt", `${new Date()} | ${userNumber} | ${userMessage}\n`);
 
-  // 🧠 Smart clarification
+  const msgLower = userMessage.toLowerCase().trim();
+
+  // 👋 Greeting handler
+  const greetings = ["hi", "hello", "hey"];
+  if (greetings.includes(msgLower)) {
+    res.type("text/xml");
+    return res.send(`
+      <Response>
+        <Message>Hi 👋 I’m your Nigerian law assistant. You can ask me about cases, explanations, or exam questions.</Message>
+      </Response>
+    `);
+  }
+
+  // 🧠 Clarification check
   if (needsClarification(userMessage)) {
     res.type("text/xml");
     return res.send(`
       <Response>
-        <Message>Could you please clarify your question?"</Message>
+        <Message>Could you clarify your question? For example: "Explain negligence in Nigerian law" or "Discuss contract law."</Message>
       </Response>
     `);
   }
@@ -186,6 +217,7 @@ app.post("/webhook", async (req, res) => {
 
     let reply = aiResponse.data.choices[0].message.content;
 
+    // 🧠 Save response
     conversations[userNumber].push({
       role: "assistant",
       content: reply,
@@ -194,7 +226,7 @@ app.post("/webhook", async (req, res) => {
     const MessagingResponse = require("twilio").twiml.MessagingResponse;
     const twiml = new MessagingResponse();
 
-    // ✂️ Paragraph splitting
+    // ✂️ Smart splitting
     const parts = reply.split("\n");
     let current = "";
 
