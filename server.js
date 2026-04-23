@@ -14,6 +14,10 @@ app.get("/", (req, res) => {
 // 🧠 Rate limiter
 const userLimits = {};
 
+// 💸 Daily usage limiter
+const dailyUsage = {};
+const DAILY_LIMIT = 20;
+
 function isRateLimited(user) {
   const now = Date.now();
 
@@ -33,7 +37,24 @@ function isRateLimited(user) {
   return userLimits[user].count > 5;
 }
 
-// 🧠 Memory storage
+function isDailyLimited(user) {
+  const today = new Date().toDateString();
+
+  if (!dailyUsage[user]) {
+    dailyUsage[user] = { date: today, count: 1 };
+    return false;
+  }
+
+  if (dailyUsage[user].date !== today) {
+    dailyUsage[user] = { date: today, count: 1 };
+    return false;
+  }
+
+  dailyUsage[user].count++;
+  return dailyUsage[user].count > DAILY_LIMIT;
+}
+
+// 🧠 Memory
 const conversations = {};
 
 // 🌍 Language detection
@@ -44,59 +65,72 @@ function detectLanguage(message) {
   return "english";
 }
 
-// 🧠 Mode handler
-function getModePrompt(message) {
+// 🧠 Mode detection (NO MORE COMMANDS)
+function detectMode(message) {
+  const msg = message.toLowerCase();
 
-  if (message.startsWith("/exam")) {
-    return {
-      role: "system",
-      content:
-        "You are a Nigerian law lecturer and examiner. Answer strictly using IRAC:\n" +
-        "Issue\nRule\nApplication\nConclusion\n" +
-        "Be clear, structured, and analytical.\n" +
-        "After answering, ask one short follow-up question.\n" +
-        "End every answer with: 'This is for educational purposes only, not legal advice.'",
-    };
+  if (msg.includes("argue") || msg.includes("justify")) return "argue";
+  if (msg.includes("discuss") || msg.includes("critically")) return "exam";
+  if (msg.includes("explain") || msg.includes("what is")) return "simple";
+
+  return "default";
+}
+
+// 🧠 Smart clarification trigger
+function needsClarification(message) {
+  const short = message.trim().split(" ").length < 3;
+  const vagueWords = ["explain", "law", "case", "contract"];
+
+  return short || vagueWords.includes(message.toLowerCase());
+}
+
+// 🧠 Prompt builder
+function buildPrompt(mode, language) {
+  let base = "";
+
+  if (mode === "exam") {
+    base =
+      "You are a Nigerian law lecturer. Answer using IRAC:\nIssue\nRule\nApplication\nConclusion\nBe structured and analytical.";
+  } else if (mode === "argue") {
+    base =
+      "You are a Nigerian lawyer. Present persuasive legal arguments with authority and reasoning.";
+  } else if (mode === "simple") {
+    base =
+      "You are a Nigerian law tutor. Explain in simple terms with examples.";
+  } else {
+    base =
+      "You are a Nigerian law tutor. Explain clearly and concisely.";
   }
 
-  if (message.startsWith("/simple")) {
-    return {
-      role: "system",
-      content:
-        "You are a Nigerian law tutor. Explain in simple terms with examples.\n" +
-        "After answering, ask one short follow-up question.\n" +
-        "End every answer with: 'This is for educational purposes only, not legal advice.'",
-    };
-  }
+  base += "\nAsk one short follow-up question.";
 
-  if (message.startsWith("/argue")) {
-    return {
-      role: "system",
-      content:
-        "You are a Nigerian lawyer in court. Argue persuasively with strong reasoning.\n" +
-        "After answering, ask one short follow-up question.\n" +
-        "End every answer with: 'This is for educational purposes only, not legal advice.'",
-    };
-  }
+  if (language === "igbo") base += "\nRespond in Igbo.";
+  if (language === "yoruba") base += "\nRespond in Yoruba.";
+  if (language === "hausa") base += "\nRespond in Hausa.";
 
-  return {
-    role: "system",
-    content:
-      "You are a Nigerian law tutor. Explain clearly and concisely.\n" +
-      "After answering, ask one short follow-up question to continue the conversation.\n" +
-      "End every answer with: 'This is for educational purposes only, not legal advice.'",
-  };
+  base += "\nEnd with: 'This is for educational purposes only, not legal advice.'";
+
+  return { role: "system", content: base };
 }
 
 // 🔥 Webhook
 app.post("/webhook", async (req, res) => {
   console.log("🔥 Webhook hit!");
-  console.log("Body:", req.body);
 
   let userMessage = req.body.Body || "";
   const userNumber = req.body.From;
 
-  // 🔒 Rate limiting
+  // 💸 Daily limit check
+  if (isDailyLimited(userNumber)) {
+    res.type("text/xml");
+    return res.send(`
+      <Response>
+        <Message>You’ve reached your daily limit. Try again tomorrow.</Message>
+      </Response>
+    `);
+  }
+
+  // 🔒 Rate limit
   if (isRateLimited(userNumber)) {
     res.type("text/xml");
     return res.send(`
@@ -107,30 +141,24 @@ app.post("/webhook", async (req, res) => {
   }
 
   // 📊 Logging
-  const log = `${new Date().toISOString()} | ${userNumber} | ${userMessage}\n`;
-  fs.appendFileSync("logs.txt", log);
+  fs.appendFileSync("logs.txt", `${new Date()} | ${userNumber} | ${userMessage}\n`);
 
-  // 🌍 Detect language
+  // 🧠 Smart clarification
+  if (needsClarification(userMessage)) {
+    res.type("text/xml");
+    return res.send(`
+      <Response>
+        <Message>Could you clarify your question? For example: "Explain negligence in Nigerian law" or "Discuss contract law."</Message>
+      </Response>
+    `);
+  }
+
   const language = detectLanguage(userMessage);
+  const mode = detectMode(userMessage);
+  const systemPrompt = buildPrompt(mode, language);
 
-  const systemPrompt = getModePrompt(userMessage);
-
-  // Modify system prompt based on detected language
-  if (language === "igbo") {
-    systemPrompt.content += "\nRespond in Igbo language.";
-  } else if (language === "yoruba") {
-    systemPrompt.content += "\nRespond in Yoruba language.";
-  } else if (language === "hausa") {
-    systemPrompt.content += "\nRespond in Hausa language.";
-  }
-
-  // ✅ Clean command
-  userMessage = userMessage.replace(/^\/\w+\s*/, "").trim();
-
-  // 🧠 Initialize memory
-  if (!conversations[userNumber]) {
-    conversations[userNumber] = [];
-  }
+  // 🧠 Memory setup
+  if (!conversations[userNumber]) conversations[userNumber] = [];
 
   conversations[userNumber].push({
     role: "user",
@@ -145,7 +173,7 @@ app.post("/webhook", async (req, res) => {
         max_tokens: 800,
         messages: [
           systemPrompt,
-          ...conversations[userNumber].slice(-6) // last 6 messages
+          ...conversations[userNumber].slice(-6),
         ],
       },
       {
@@ -156,15 +184,8 @@ app.post("/webhook", async (req, res) => {
       }
     );
 
-    console.log("✅ AI RESPONSE RECEIVED");
-
     let reply = aiResponse.data.choices[0].message.content;
 
-    if (!reply) {
-      reply = "Sorry, something went wrong. Please try again.";
-    }
-
-    // 🧠 Save AI reply to memory
     conversations[userNumber].push({
       role: "assistant",
       content: reply,
@@ -173,29 +194,26 @@ app.post("/webhook", async (req, res) => {
     const MessagingResponse = require("twilio").twiml.MessagingResponse;
     const twiml = new MessagingResponse();
 
-    // ✂️ Smart paragraph splitting
-    const paragraphs = reply.split("\n");
+    // ✂️ Paragraph splitting
+    const parts = reply.split("\n");
+    let current = "";
 
-    let currentMessage = "";
-
-    paragraphs.forEach((para) => {
-      if ((currentMessage + para).length > 1500) {
-        twiml.message(currentMessage.trim());
-        currentMessage = para;
+    parts.forEach(p => {
+      if ((current + p).length > 1500) {
+        twiml.message(current.trim());
+        current = p;
       } else {
-        currentMessage += "\n" + para;
+        current += "\n" + p;
       }
     });
 
-    if (currentMessage) {
-      twiml.message(currentMessage.trim());
-    }
+    if (current) twiml.message(current.trim());
 
     res.type("text/xml");
     res.send(twiml.toString());
 
   } catch (error) {
-    console.error("❌ ERROR:", error.response?.data || error.message);
+    console.error(error.response?.data || error.message);
 
     res.type("text/xml");
     res.send(`
