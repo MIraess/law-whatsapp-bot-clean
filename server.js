@@ -148,7 +148,7 @@ app.post("/webhook", async (req, res) => {
     res.type("text/xml");
     return res.send(`
       <Response>
-        <Message>Could you clarify your question? For example: "Explain negligence in Nigerian law" or "Discuss contract law."</Message>
+        <Message>Could you please clarify your question?"</Message>
       </Response>
     `);
   }
