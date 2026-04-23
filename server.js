@@ -34,8 +34,35 @@ function isRateLimited(user) {
   return userLimits[user].count > 5;
 }
 
-// 🧠 Mode handler
+// 🧠 Mode handler (NOW WITH LANGUAGE SUPPORT)
 function getModePrompt(message) {
+
+  // 🌍 Language modes
+  if (message.startsWith("/hausa")) {
+    return {
+      role: "system",
+      content:
+        "Explain Nigerian legal concepts clearly in Hausa language. Use simple explanations and examples. End with: 'Wannan don ilmantarwa ne kawai, ba shawarar doka ba.'",
+    };
+  }
+
+  if (message.startsWith("/igbo")) {
+    return {
+      role: "system",
+      content:
+        "Kọwaa iwu Nigeria n'ụzọ dị mfe n'asụsụ Igbo. Jiri ihe atụ mee ka o doo anya. Kwụsị na: 'Nke a bụ naanị maka mmụta, ọ bụghị ndụmọdụ iwu.'",
+    };
+  }
+
+  if (message.startsWith("/yoruba")) {
+    return {
+      role: "system",
+      content:
+        "Ṣàlàyé òfin Nàìjíríà ní èdè Yorùbá ní kedere. Lo àpẹẹrẹ. Pari pẹlu: 'Eyi jẹ fun ẹkọ nikan, kii ṣe imọran ofin.'",
+    };
+  }
+
+  // ⚖️ Existing modes
   if (message.startsWith("/exam")) {
     return {
       role: "system",
