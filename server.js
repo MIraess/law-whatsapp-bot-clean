@@ -30,39 +30,23 @@ function isRateLimited(user) {
   }
 
   userLimits[user].count++;
-
   return userLimits[user].count > 5;
 }
 
-// 🧠 Mode handler (NOW WITH LANGUAGE SUPPORT)
+// 🧠 Memory storage
+const conversations = {};
+
+// 🌍 Language detection
+function detectLanguage(message) {
+  if (/kedu|iwu|gịnị/i.test(message)) return "igbo";
+  if (/kini|ofin|ṣe/i.test(message)) return "yoruba";
+  if (/menene|doka/i.test(message)) return "hausa";
+  return "english";
+}
+
+// 🧠 Mode handler
 function getModePrompt(message) {
 
-  // 🌍 Language modes
-  if (message.startsWith("/hausa")) {
-    return {
-      role: "system",
-      content:
-        "Explain Nigerian legal concepts clearly in Hausa language. Use simple explanations and examples. End with: 'Wannan don ilmantarwa ne kawai, ba shawarar doka ba.'",
-    };
-  }
-
-  if (message.startsWith("/igbo")) {
-    return {
-      role: "system",
-      content:
-        "Kọwaa iwu Nigeria n'ụzọ dị mfe n'asụsụ Igbo. Jiri ihe atụ mee ka o doo anya. Kwụsị na: 'Nke a bụ naanị maka mmụta, ọ bụghị ndụmọdụ iwu.'",
-    };
-  }
-
-  if (message.startsWith("/yoruba")) {
-    return {
-      role: "system",
-      content:
-        "Ṣàlàyé òfin Nàìjíríà ní èdè Yorùbá ní kedere. Lo àpẹẹrẹ. Pari pẹlu: 'Eyi jẹ fun ẹkọ nikan, kii ṣe imọran ofin.'",
-    };
-  }
-
-  // ⚖️ Existing modes
   if (message.startsWith("/exam")) {
     return {
       role: "system",
@@ -70,6 +54,7 @@ function getModePrompt(message) {
         "You are a Nigerian law lecturer and examiner. Answer strictly using IRAC:\n" +
         "Issue\nRule\nApplication\nConclusion\n" +
         "Be clear, structured, and analytical.\n" +
+        "After answering, ask one short follow-up question.\n" +
         "End every answer with: 'This is for educational purposes only, not legal advice.'",
     };
   }
@@ -79,6 +64,7 @@ function getModePrompt(message) {
       role: "system",
       content:
         "You are a Nigerian law tutor. Explain in simple terms with examples.\n" +
+        "After answering, ask one short follow-up question.\n" +
         "End every answer with: 'This is for educational purposes only, not legal advice.'",
     };
   }
@@ -88,6 +74,7 @@ function getModePrompt(message) {
       role: "system",
       content:
         "You are a Nigerian lawyer in court. Argue persuasively with strong reasoning.\n" +
+        "After answering, ask one short follow-up question.\n" +
         "End every answer with: 'This is for educational purposes only, not legal advice.'",
     };
   }
@@ -96,6 +83,7 @@ function getModePrompt(message) {
     role: "system",
     content:
       "You are a Nigerian law tutor. Explain clearly and concisely.\n" +
+      "After answering, ask one short follow-up question to continue the conversation.\n" +
       "End every answer with: 'This is for educational purposes only, not legal advice.'",
   };
 }
@@ -122,10 +110,32 @@ app.post("/webhook", async (req, res) => {
   const log = `${new Date().toISOString()} | ${userNumber} | ${userMessage}\n`;
   fs.appendFileSync("logs.txt", log);
 
+  // 🌍 Detect language
+  const language = detectLanguage(userMessage);
+
   const systemPrompt = getModePrompt(userMessage);
+
+  // Modify system prompt based on detected language
+  if (language === "igbo") {
+    systemPrompt.content += "\nRespond in Igbo language.";
+  } else if (language === "yoruba") {
+    systemPrompt.content += "\nRespond in Yoruba language.";
+  } else if (language === "hausa") {
+    systemPrompt.content += "\nRespond in Hausa language.";
+  }
 
   // ✅ Clean command
   userMessage = userMessage.replace(/^\/\w+\s*/, "").trim();
+
+  // 🧠 Initialize memory
+  if (!conversations[userNumber]) {
+    conversations[userNumber] = [];
+  }
+
+  conversations[userNumber].push({
+    role: "user",
+    content: userMessage,
+  });
 
   try {
     const aiResponse = await axios.post(
@@ -135,10 +145,7 @@ app.post("/webhook", async (req, res) => {
         max_tokens: 800,
         messages: [
           systemPrompt,
-          {
-            role: "user",
-            content: userMessage,
-          },
+          ...conversations[userNumber].slice(-6) // last 6 messages
         ],
       },
       {
@@ -157,10 +164,16 @@ app.post("/webhook", async (req, res) => {
       reply = "Sorry, something went wrong. Please try again.";
     }
 
+    // 🧠 Save AI reply to memory
+    conversations[userNumber].push({
+      role: "assistant",
+      content: reply,
+    });
+
     const MessagingResponse = require("twilio").twiml.MessagingResponse;
     const twiml = new MessagingResponse();
 
-    // 🧠 SMART PARAGRAPH SPLITTING (FIXED FLOW)
+    // ✂️ Smart paragraph splitting
     const paragraphs = reply.split("\n");
 
     let currentMessage = "";
