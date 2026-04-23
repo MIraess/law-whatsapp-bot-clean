@@ -6,12 +6,12 @@ const fs = require("fs");
 const app = express();
 app.use(express.urlencoded({ extended: true }));
 
-// ✅ TEST ROUTE (VERY IMPORTANT)
+// ✅ Test route
 app.get("/", (req, res) => {
   res.send("Server is alive 🔥");
 });
 
-// 🧠 Simple in-memory rate limiter
+// 🧠 Rate limiter
 const userLimits = {};
 
 function isRateLimited(user) {
@@ -41,13 +41,8 @@ function getModePrompt(message) {
       role: "system",
       content:
         "You are a Nigerian law lecturer and examiner. Answer strictly using IRAC:\n" +
-        "- Issue\n" +
-        "- Rule (state relevant legal principles and Nigerian authorities where possible)\n" +
-        "- Application (apply law clearly to facts or scenario)\n" +
-        "- Conclusion\n" +
-        "Your tone must be formal, precise, and exam-standard.\n" +
-        "Where applicable, reference Nigerian cases, statutes, or common law principles used in Nigerian courts.\n" +
-        "Avoid vague explanations. Be direct and analytical.\n" +
+        "Issue\nRule\nApplication\nConclusion\n" +
+        "Be clear, structured, and analytical.\n" +
         "End every answer with: 'This is for educational purposes only, not legal advice.'",
     };
   }
@@ -56,10 +51,7 @@ function getModePrompt(message) {
     return {
       role: "system",
       content:
-        "You are a Nigerian law tutor.\n" +
-        "Explain legal concepts in very simple terms as if teaching a 100-level law student.\n" +
-        "Use clear language, relatable examples, and step-by-step explanations.\n" +
-        "Avoid unnecessary legal jargon.\n" +
+        "You are a Nigerian law tutor. Explain in simple terms with examples.\n" +
         "End every answer with: 'This is for educational purposes only, not legal advice.'",
     };
   }
@@ -68,14 +60,7 @@ function getModePrompt(message) {
     return {
       role: "system",
       content:
-        "You are a Nigerian lawyer in a moot court competition.\n" +
-        "Present strong, persuasive legal arguments.\n" +
-        "Structure your answer like courtroom submissions:\n" +
-        "- Clear position\n" +
-        "- Supporting legal principles\n" +
-        "- Authorities where relevant\n" +
-        "- Convincing reasoning\n" +
-        "Sound confident, logical, and assertive.\n" +
+        "You are a Nigerian lawyer in court. Argue persuasively with strong reasoning.\n" +
         "End every answer with: 'This is for educational purposes only, not legal advice.'",
     };
   }
@@ -83,11 +68,12 @@ function getModePrompt(message) {
   return {
     role: "system",
     content:
-      "You are a Nigerian law tutor. Explain clearly and concisely. Always end with 'This is for educational purposes only, not legal advice.'",
+      "You are a Nigerian law tutor. Explain clearly and concisely.\n" +
+      "End every answer with: 'This is for educational purposes only, not legal advice.'",
   };
 }
 
-// 🔥 WEBHOOK ROUTE
+// 🔥 Webhook
 app.post("/webhook", async (req, res) => {
   console.log("🔥 Webhook hit!");
   console.log("Body:", req.body);
@@ -105,7 +91,7 @@ app.post("/webhook", async (req, res) => {
     `);
   }
 
-  // 📊 Log messages
+  // 📊 Logging
   const log = `${new Date().toISOString()} | ${userNumber} | ${userMessage}\n`;
   fs.appendFileSync("logs.txt", log);
 
@@ -147,12 +133,22 @@ app.post("/webhook", async (req, res) => {
     const MessagingResponse = require("twilio").twiml.MessagingResponse;
     const twiml = new MessagingResponse();
 
-    // ✂️ Split long responses
-    if (reply.length > 1500) {
-      const parts = reply.match(/.{1,1500}/g);
-      parts.forEach(part => twiml.message(part));
-    } else {
-      twiml.message(reply);
+    // 🧠 SMART PARAGRAPH SPLITTING (FIXED FLOW)
+    const paragraphs = reply.split("\n");
+
+    let currentMessage = "";
+
+    paragraphs.forEach((para) => {
+      if ((currentMessage + para).length > 1500) {
+        twiml.message(currentMessage.trim());
+        currentMessage = para;
+      } else {
+        currentMessage += "\n" + para;
+      }
+    });
+
+    if (currentMessage) {
+      twiml.message(currentMessage.trim());
     }
 
     res.type("text/xml");
@@ -170,7 +166,7 @@ app.post("/webhook", async (req, res) => {
   }
 });
 
-// 🚀 START SERVER
+// 🚀 Start server
 app.listen(3000, () => {
   console.log("Server running on port 3000");
 });
