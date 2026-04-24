@@ -12,20 +12,89 @@ const client = twilio(
   process.env.TWILIO_AUTH_TOKEN
 );
 
-// ✅ Test route
-app.get("/", (req, res) => {
-  res.send("Server is alive 🔥");
-});
-
-// 🧠 Memory
+// ================= MEMORY =================
 const conversations = {};
-
-// 🧠 Limits
+const userProfiles = {};
 const userLimits = {};
 const dailyUsage = {};
 const DAILY_LIMIT = 20;
 
-// 🔒 Rate limiter
+// ================= UTILITIES =================
+function cleanMessage(message) {
+  return message.toLowerCase().replace(/[^\w\s]/gi, "").trim();
+}
+
+function detectEmotion(message) {
+  if (/😂|🤣/.test(message)) return "funny";
+  if (/😭|😩/.test(message)) return "confused";
+  if (/🔥/.test(message)) return "impressed";
+  if (/😊|🙂/.test(message)) return "friendly";
+  return "neutral";
+}
+
+function getReaction(message) {
+  if (/😂|🤣/.test(message)) return "😄 Got it, let’s look at this...";
+  if (/😭|😩/.test(message)) return "😅 Don’t worry, I’ll simplify it...";
+  if (/🔥/.test(message)) return "🔥 Nice one, let’s dive in...";
+  return "⚖️ Analyzing...";
+}
+
+function detectMode(message) {
+  const msg = message.toLowerCase();
+  if (msg.includes("argue") || msg.includes("justify")) return "exam";
+  if (msg.includes("discuss") || msg.includes("critically")) return "exam";
+  if (msg.includes("explain") || msg.includes("what is")) return "simple";
+  return "default";
+}
+
+function needsClarification(message) {
+  const msg = cleanMessage(message);
+
+  const greetings = ["hi", "hello", "hey"];
+  if (greetings.includes(msg)) return false;
+
+  if (msg.split(" ").length <= 1) return true;
+
+  const vague = ["law", "case", "help"];
+  return vague.includes(msg);
+}
+
+function updateUserProfile(user, message) {
+  if (!userProfiles[user]) {
+    userProfiles[user] = { style: "default" };
+  }
+
+  const msg = message.toLowerCase();
+
+  if (msg.includes("explain")) userProfiles[user].style = "simple";
+  if (msg.includes("discuss") || msg.includes("argue"))
+    userProfiles[user].style = "exam";
+
+  if (/😭|😩/.test(message)) userProfiles[user].style = "simple";
+}
+
+// ================= PROMPT =================
+function buildPrompt(mode, userProfile) {
+  let style = userProfile?.style || mode;
+
+  let base = "";
+
+  if (style === "exam") {
+    base = "Answer using IRAC: Issue, Rule, Application, Conclusion.";
+  } else if (style === "simple") {
+    base = "Explain in very simple terms with examples.";
+  } else {
+    base = "Explain clearly and concisely.";
+  }
+
+  base += "\nUse light professional emojis (⚖️📚✅).";
+  base += "\nAsk one short follow-up question at the end.";
+  base += "\nEnd with: 'This is for educational purposes only, not legal advice.'";
+
+  return { role: "system", content: base };
+}
+
+// ================= LIMITS =================
 function isRateLimited(user) {
   const now = Date.now();
 
@@ -45,7 +114,6 @@ function isRateLimited(user) {
   return userLimits[user].count > 5;
 }
 
-// 💸 Daily limit
 function isDailyLimited(user) {
   const today = new Date().toDateString();
 
@@ -63,132 +131,55 @@ function isDailyLimited(user) {
   return dailyUsage[user].count > DAILY_LIMIT;
 }
 
-// 🧠 CLEAN MESSAGE (removes emojis for logic checks)
-function cleanMessage(message) {
-  return message
-    .toLowerCase()
-    .replace(/[^\w\s]/gi, "")
-    .trim();
+// ================= VOICE =================
+async function transcribeAudio(mediaUrl) {
+  const audio = await axios.get(mediaUrl, {
+    responseType: "arraybuffer",
+    auth: {
+      username: process.env.TWILIO_ACCOUNT_SID,
+      password: process.env.TWILIO_AUTH_TOKEN,
+    },
+  });
+
+  const response = await axios.post(
+    "https://api.openai.com/v1/audio/transcriptions",
+    audio.data,
+    {
+      headers: {
+        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+        "Content-Type": "audio/ogg",
+      },
+    }
+  );
+
+  return response.data.text;
 }
 
-// 🧠 EMOTION DETECTION
-function detectEmotion(message) {
-  if (/😂|🤣|😆/.test(message)) return "funny";
-  if (/😭|😢|😩/.test(message)) return "confused";
-  if (/🔥|💯|👏/.test(message)) return "impressed";
-  if (/😊|🙂|😄/.test(message)) return "friendly";
-  if (/😡|😠/.test(message)) return "angry";
-  return "neutral";
-}
-
-// 🧠 REACTION SYSTEM
-function getReaction(message) {
-  if (/😂|🤣/.test(message)) return "😄 Got it, let’s look at this...";
-  if (/😭|😩/.test(message)) return "😅 Don’t worry, I’ll simplify it...";
-  if (/🔥/.test(message)) return "🔥 Nice question, let’s dive in...";
-  return "⚖️ Analyzing...";
-}
-
-// 🌍 Language detection
-function detectLanguage(message) {
-  if (/kedu|iwu|gịnị/i.test(message)) return "igbo";
-  if (/kini|ofin|ṣe/i.test(message)) return "yoruba";
-  if (/menene|doka/i.test(message)) return "hausa";
-  return "english";
-}
-
-// 🧠 Mode detection
-function detectMode(message) {
-  const msg = message.toLowerCase();
-
-  if (msg.includes("argue") || msg.includes("justify")) return "argue";
-  if (msg.includes("discuss") || msg.includes("critically")) return "exam";
-  if (msg.includes("explain") || msg.includes("what is")) return "simple";
-
-  return "default";
-}
-
-// 🧠 Clarification
-function needsClarification(message) {
-  const msg = cleanMessage(message);
-
-  const greetings = ["hi", "hello", "hey"];
-  if (greetings.includes(msg)) return false;
-
-  const legalKeywords = [
-    "negligence", "contract", "tort", "crime",
-    "offer", "acceptance", "liability"
-  ];
-  if (legalKeywords.includes(msg)) return false;
-
-  if (msg.split(" ").length === 2) return false;
-
-  const vagueWords = ["law", "case", "help"];
-  if (vagueWords.includes(msg)) return true;
-
-  return false;
-}
-
-// 🧠 Prompt builder
-function buildPrompt(mode, language) {
-  let base = "";
-
-  if (mode === "exam") {
-    base = "Answer using IRAC: Issue, Rule, Application, Conclusion.";
-  } else if (mode === "argue") {
-    base = "Provide strong legal arguments like a Nigerian lawyer.";
-  } else if (mode === "simple") {
-    base = "Explain in very simple terms with examples.";
-  } else {
-    base = "Explain clearly and concisely.";
-  }
-
-  base += "\nAsk one short follow-up question at the end.";
-  base += "\nUse light, professional emojis like ⚖️ 📚 ✅ where appropriate.";
-
-  if (language === "igbo") base += "\nRespond in Igbo.";
-  if (language === "yoruba") base += "\nRespond in Yoruba.";
-  if (language === "hausa") base += "\nRespond in Hausa.";
-
-  base += "\nEnd with: 'This is for educational purposes only, not legal advice.'";
-
-  return { role: "system", content: base };
-}
-
-// 🔥 WEBHOOK
+// ================= WEBHOOK =================
 app.post("/webhook", async (req, res) => {
-
   let userMessage = req.body.Body || "";
   const userNumber = req.body.From;
+
+  // 🎤 Voice note
+  if (req.body.NumMedia && req.body.NumMedia !== "0") {
+    try {
+      userMessage = await transcribeAudio(req.body.MediaUrl0);
+    } catch {
+      return res.send(`<Response><Message>Couldn't process voice note.</Message></Response>`);
+    }
+  }
 
   const msgLower = cleanMessage(userMessage);
   const emotion = detectEmotion(userMessage);
 
   // 👋 Greeting
-  const greetings = ["hi", "hello", "hey"];
-  if (greetings.includes(msgLower)) {
-    return res.send(`
-      <Response>
-        <Message>Hi 👋 I’m your Nigerian law assistant. Ask me anything about law.</Message>
-      </Response>
-    `);
+  if (["hi", "hello", "hey"].includes(msgLower)) {
+    return res.send(`<Response><Message>Hi 👋 Ask me anything about law.</Message></Response>`);
   }
 
-  // 💬 Emotional quick responses
-  if (emotion === "confused") {
-    return res.send(`
-      <Response>
-        <Message>😅 No worries, I’ve got you. Ask your question and I’ll simplify it.</Message>
-      </Response>
-    `);
-  }
-
+  // 💬 Emotion quick response
   if (emotion === "impressed") {
-    return res.send(`
-      <Response>
-        <Message>😄 Glad you like it! Want me to go deeper?</Message>
-      </Response>
-    `);
+    return res.send(`<Response><Message>😄 Glad you like it! Want more?</Message></Response>`);
   }
 
   // 💸 Limits
@@ -202,61 +193,42 @@ app.post("/webhook", async (req, res) => {
 
   // ❗ Clarification
   if (needsClarification(userMessage)) {
-    return res.send(`
-      <Response>
-        <Message>Could you clarify? Example: "Explain negligence in Nigerian law."</Message>
-      </Response>
-    `);
+    return res.send(`<Response><Message>Please clarify your question.</Message></Response>`);
   }
 
-  // ⚡ Reaction instead of plain "thinking"
-  const reaction = getReaction(userMessage);
+  // 🧠 Personality update
+  updateUserProfile(userNumber, userMessage);
 
-  res.send(`
-    <Response>
-      <Message>${reaction}</Message>
-    </Response>
-  `);
+  // ⚡ Reaction
+  res.send(`<Response><Message>${getReaction(userMessage)}</Message></Response>`);
 
-  // 🧠 Background processing
+  // ================= AI PROCESS =================
   (async () => {
     try {
-
-      const language = detectLanguage(userMessage);
       const mode = detectMode(userMessage);
-      const systemPrompt = buildPrompt(mode, language);
+      const systemPrompt = buildPrompt(mode, userProfiles[userNumber]);
 
       if (!conversations[userNumber]) conversations[userNumber] = [];
 
-      conversations[userNumber].push({
-        role: "user",
-        content: userMessage
-      });
+      conversations[userNumber].push({ role: "user", content: userMessage });
 
       const aiResponse = await axios.post(
         "https://api.openai.com/v1/chat/completions",
         {
           model: "gpt-4o-mini",
           max_tokens: 800,
-          messages: [
-            systemPrompt,
-            ...conversations[userNumber].slice(-6)
-          ],
+          messages: [systemPrompt, ...conversations[userNumber].slice(-6)],
         },
         {
           headers: {
             Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-            "Content-Type": "application/json",
           },
         }
       );
 
       let reply = aiResponse.data.choices[0].message.content;
 
-      conversations[userNumber].push({
-        role: "assistant",
-        content: reply
-      });
+      conversations[userNumber].push({ role: "assistant", content: reply });
 
       // 🧠 Extract follow-up
       let followUp = "";
@@ -267,7 +239,7 @@ app.post("/webhook", async (req, res) => {
         reply = reply.replace(followUp, "").trim();
       }
 
-      // 🧠 Split properly
+      // 🧠 Split response properly
       let lines = reply.split("\n").filter(l => l.trim() !== "");
       let messages = [];
       let current = "";
@@ -283,12 +255,12 @@ app.post("/webhook", async (req, res) => {
 
       if (current) messages.push(current.trim());
 
-      // 🚀 Send structured messages
+      // 🚀 Send messages
       for (let msg of messages) {
         await client.messages.create({
           body: msg,
           from: "whatsapp:+14155238886",
-          to: userNumber
+          to: userNumber,
         });
 
         await new Promise(r => setTimeout(r, 700));
@@ -299,21 +271,21 @@ app.post("/webhook", async (req, res) => {
         await client.messages.create({
           body: followUp,
           from: "whatsapp:+14155238886",
-          to: userNumber
+          to: userNumber,
         });
       }
 
     } catch (err) {
       await client.messages.create({
-        body: "I ran into an issue. Try rephrasing your question.",
+        body: "Something went wrong. Try again.",
         from: "whatsapp:+14155238886",
-        to: userNumber
+        to: userNumber,
       });
     }
   })();
 });
 
-// 🚀 START
+// ================= START =================
 app.listen(3000, () => {
   console.log("Server running on port 3000");
 });
