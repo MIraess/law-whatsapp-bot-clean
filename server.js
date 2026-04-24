@@ -20,7 +20,7 @@ app.get("/", (req, res) => {
 // 🧠 Memory
 const conversations = {};
 
-// 🧠 Rate + Daily limit
+// 🧠 Limits
 const userLimits = {};
 const dailyUsage = {};
 const DAILY_LIMIT = 20;
@@ -63,6 +63,32 @@ function isDailyLimited(user) {
   return dailyUsage[user].count > DAILY_LIMIT;
 }
 
+// 🧠 CLEAN MESSAGE (removes emojis for logic checks)
+function cleanMessage(message) {
+  return message
+    .toLowerCase()
+    .replace(/[^\w\s]/gi, "")
+    .trim();
+}
+
+// 🧠 EMOTION DETECTION
+function detectEmotion(message) {
+  if (/😂|🤣|😆/.test(message)) return "funny";
+  if (/😭|😢|😩/.test(message)) return "confused";
+  if (/🔥|💯|👏/.test(message)) return "impressed";
+  if (/😊|🙂|😄/.test(message)) return "friendly";
+  if (/😡|😠/.test(message)) return "angry";
+  return "neutral";
+}
+
+// 🧠 REACTION SYSTEM
+function getReaction(message) {
+  if (/😂|🤣/.test(message)) return "😄 Got it, let’s look at this...";
+  if (/😭|😩/.test(message)) return "😅 Don’t worry, I’ll simplify it...";
+  if (/🔥/.test(message)) return "🔥 Nice question, let’s dive in...";
+  return "⚖️ Analyzing your question...";
+}
+
 // 🌍 Language detection
 function detectLanguage(message) {
   if (/kedu|iwu|gịnị/i.test(message)) return "igbo";
@@ -84,7 +110,7 @@ function detectMode(message) {
 
 // 🧠 Clarification
 function needsClarification(message) {
-  const msg = message.toLowerCase().trim();
+  const msg = cleanMessage(message);
 
   const greetings = ["hi", "hello", "hey"];
   if (greetings.includes(msg)) return false;
@@ -118,6 +144,7 @@ function buildPrompt(mode, language) {
   }
 
   base += "\nAsk one short follow-up question at the end.";
+  base += "\nUse light, professional emojis like ⚖️ 📚 ✅ where appropriate.";
 
   if (language === "igbo") base += "\nRespond in Igbo.";
   if (language === "yoruba") base += "\nRespond in Yoruba.";
@@ -134,9 +161,10 @@ app.post("/webhook", async (req, res) => {
   let userMessage = req.body.Body || "";
   const userNumber = req.body.From;
 
-  const msgLower = userMessage.toLowerCase().trim();
+  const msgLower = cleanMessage(userMessage);
+  const emotion = detectEmotion(userMessage);
 
-  // 👋 Greeting FIRST
+  // 👋 Greeting
   const greetings = ["hi", "hello", "hey"];
   if (greetings.includes(msgLower)) {
     return res.send(`
@@ -146,21 +174,30 @@ app.post("/webhook", async (req, res) => {
     `);
   }
 
-  // 💸 Limits
-  if (isDailyLimited(userNumber)) {
+  // 💬 Emotional quick responses
+  if (emotion === "confused") {
     return res.send(`
       <Response>
-        <Message>You’ve reached your daily limit.</Message>
+        <Message>😅 No worries, I’ve got you. Ask your question and I’ll simplify it.</Message>
       </Response>
     `);
   }
 
-  if (isRateLimited(userNumber)) {
+  if (emotion === "impressed") {
     return res.send(`
       <Response>
-        <Message>Please slow down.</Message>
+        <Message>😄 Glad you like it! Want me to go deeper?</Message>
       </Response>
     `);
+  }
+
+  // 💸 Limits
+  if (isDailyLimited(userNumber)) {
+    return res.send(`<Response><Message>Daily limit reached.</Message></Response>`);
+  }
+
+  if (isRateLimited(userNumber)) {
+    return res.send(`<Response><Message>Please slow down.</Message></Response>`);
   }
 
   // ❗ Clarification
@@ -172,10 +209,12 @@ app.post("/webhook", async (req, res) => {
     `);
   }
 
-  // ⚡ Instant response
+  // ⚡ Reaction instead of plain "thinking"
+  const reaction = getReaction(userMessage);
+
   res.send(`
     <Response>
-      <Message>⚖️ Analyzing your question...</Message>
+      <Message>${reaction}</Message>
     </Response>
   `);
 
@@ -219,7 +258,7 @@ app.post("/webhook", async (req, res) => {
         content: reply
       });
 
-      // 🧠 Extract follow-up question
+      // 🧠 Extract follow-up
       let followUp = "";
       const matches = reply.match(/[^.?!]*\?/g);
 
@@ -228,7 +267,7 @@ app.post("/webhook", async (req, res) => {
         reply = reply.replace(followUp, "").trim();
       }
 
-      // 🧠 Better splitting
+      // 🧠 Split properly
       let lines = reply.split("\n").filter(l => l.trim() !== "");
       let messages = [];
       let current = "";
@@ -255,7 +294,7 @@ app.post("/webhook", async (req, res) => {
         await new Promise(r => setTimeout(r, 700));
       }
 
-      // ✅ Send follow-up LAST
+      // ✅ Follow-up LAST
       if (followUp) {
         await client.messages.create({
           body: followUp,
