@@ -86,7 +86,7 @@ function getReaction(message) {
   if (/😂|🤣/.test(message)) return "😄 Got it, let’s look at this...";
   if (/😭|😩/.test(message)) return "😅 Don’t worry, I’ll simplify it...";
   if (/🔥/.test(message)) return "🔥 Nice question, let’s dive in...";
-  return "⚖️ Analyzing your question...";
+  return "⚖️ Analyzing...";
 }
 
 // 🌍 Language detection
