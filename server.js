@@ -117,7 +117,7 @@ function buildPrompt(mode, language) {
     base = "Explain clearly and concisely.";
   }
 
-  base += "\nAsk one short follow-up question.";
+  base += "\nAsk one short follow-up question at the end.";
 
   if (language === "igbo") base += "\nRespond in Igbo.";
   if (language === "yoruba") base += "\nRespond in Yoruba.";
@@ -133,6 +133,18 @@ app.post("/webhook", async (req, res) => {
 
   let userMessage = req.body.Body || "";
   const userNumber = req.body.From;
+
+  const msgLower = userMessage.toLowerCase().trim();
+
+  // 👋 Greeting FIRST
+  const greetings = ["hi", "hello", "hey"];
+  if (greetings.includes(msgLower)) {
+    return res.send(`
+      <Response>
+        <Message>Hi 👋 I’m your Nigerian law assistant. Ask me anything about law.</Message>
+      </Response>
+    `);
+  }
 
   // 💸 Limits
   if (isDailyLimited(userNumber)) {
@@ -151,16 +163,6 @@ app.post("/webhook", async (req, res) => {
     `);
   }
 
-  // 👋 Greeting
-  const greetings = ["hi", "hello", "hey"];
-  if (greetings.includes(userMessage.toLowerCase().trim())) {
-    return res.send(`
-      <Response>
-        <Message>Hi 👋 I’m your Nigerian law assistant. Ask me anything about law.</Message>
-      </Response>
-    `);
-  }
-
   // ❗ Clarification
   if (needsClarification(userMessage)) {
     return res.send(`
@@ -170,7 +172,7 @@ app.post("/webhook", async (req, res) => {
     `);
   }
 
-  // ⚡ SEND INSTANT "THINKING"
+  // ⚡ Instant response
   res.send(`
     <Response>
       <Message>⚖️ Analyzing your question...</Message>
@@ -217,17 +219,49 @@ app.post("/webhook", async (req, res) => {
         content: reply
       });
 
-      // 🚀 PROGRESSIVE RESPONSE
-      const sections = reply.split("\n\n");
+      // 🧠 Extract follow-up question
+      let followUp = "";
+      const matches = reply.match(/[^.?!]*\?/g);
 
-      for (let section of sections) {
+      if (matches && matches.length > 0) {
+        followUp = matches[matches.length - 1].trim();
+        reply = reply.replace(followUp, "").trim();
+      }
+
+      // 🧠 Better splitting
+      let lines = reply.split("\n").filter(l => l.trim() !== "");
+      let messages = [];
+      let current = "";
+
+      lines.forEach(line => {
+        if ((current + line).length > 1200) {
+          messages.push(current.trim());
+          current = line;
+        } else {
+          current += "\n" + line;
+        }
+      });
+
+      if (current) messages.push(current.trim());
+
+      // 🚀 Send structured messages
+      for (let msg of messages) {
         await client.messages.create({
-          body: section,
+          body: msg,
           from: "whatsapp:+14155238886",
           to: userNumber
         });
 
-        await new Promise(r => setTimeout(r, 800)); // delay for realism
+        await new Promise(r => setTimeout(r, 700));
+      }
+
+      // ✅ Send follow-up LAST
+      if (followUp) {
+        await client.messages.create({
+          body: followUp,
+          from: "whatsapp:+14155238886",
+          to: userNumber
+        });
       }
 
     } catch (err) {
