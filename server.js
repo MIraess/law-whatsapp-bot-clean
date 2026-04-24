@@ -2,22 +2,30 @@ require("dotenv").config();
 const express = require("express");
 const axios = require("axios");
 const fs = require("fs");
+const twilio = require("twilio");
 
 const app = express();
 app.use(express.urlencoded({ extended: true }));
+
+const client = twilio(
+  process.env.TWILIO_ACCOUNT_SID,
+  process.env.TWILIO_AUTH_TOKEN
+);
 
 // ✅ Test route
 app.get("/", (req, res) => {
   res.send("Server is alive 🔥");
 });
 
-// 🧠 Rate limiter
-const userLimits = {};
+// 🧠 Memory
+const conversations = {};
 
-// 💸 Daily usage limiter
+// 🧠 Rate + Daily limit
+const userLimits = {};
 const dailyUsage = {};
 const DAILY_LIMIT = 20;
 
+// 🔒 Rate limiter
 function isRateLimited(user) {
   const now = Date.now();
 
@@ -37,6 +45,7 @@ function isRateLimited(user) {
   return userLimits[user].count > 5;
 }
 
+// 💸 Daily limit
 function isDailyLimited(user) {
   const today = new Date().toDateString();
 
@@ -53,9 +62,6 @@ function isDailyLimited(user) {
   dailyUsage[user].count++;
   return dailyUsage[user].count > DAILY_LIMIT;
 }
-
-// 🧠 Memory
-const conversations = {};
 
 // 🌍 Language detection
 function detectLanguage(message) {
@@ -76,27 +82,22 @@ function detectMode(message) {
   return "default";
 }
 
-// 🧠 FIXED Smart clarification
+// 🧠 Clarification
 function needsClarification(message) {
   const msg = message.toLowerCase().trim();
 
-  // ✅ Greetings
-  const greetings = ["hi", "hello", "hey", "good morning", "good afternoon", "good evening"];
+  const greetings = ["hi", "hello", "hey"];
   if (greetings.includes(msg)) return false;
 
-  // ✅ Legal keywords
   const legalKeywords = [
     "negligence", "contract", "tort", "crime",
-    "offer", "acceptance", "consideration",
-    "liability", "damages", "battery", "assault"
+    "offer", "acceptance", "liability"
   ];
   if (legalKeywords.includes(msg)) return false;
 
-  // ✅ Short meaningful phrases (2 words)
   if (msg.split(" ").length === 2) return false;
 
-  // ❗ Truly vague
-  const vagueWords = ["law", "case", "help", "explain"];
+  const vagueWords = ["law", "case", "help"];
   if (vagueWords.includes(msg)) return true;
 
   return false;
@@ -107,17 +108,13 @@ function buildPrompt(mode, language) {
   let base = "";
 
   if (mode === "exam") {
-    base =
-      "You are a Nigerian law lecturer. Answer using IRAC:\nIssue\nRule\nApplication\nConclusion\nBe structured and analytical.";
+    base = "Answer using IRAC: Issue, Rule, Application, Conclusion.";
   } else if (mode === "argue") {
-    base =
-      "You are a Nigerian lawyer. Present persuasive legal arguments with authority and reasoning.";
+    base = "Provide strong legal arguments like a Nigerian lawyer.";
   } else if (mode === "simple") {
-    base =
-      "You are a Nigerian law tutor. Explain in simple terms with examples.";
+    base = "Explain in very simple terms with examples.";
   } else {
-    base =
-      "You are a Nigerian law tutor. Explain clearly and concisely.";
+    base = "Explain clearly and concisely.";
   }
 
   base += "\nAsk one short follow-up question.";
@@ -131,132 +128,119 @@ function buildPrompt(mode, language) {
   return { role: "system", content: base };
 }
 
-// 🔥 Webhook
+// 🔥 WEBHOOK
 app.post("/webhook", async (req, res) => {
-  console.log("🔥 Webhook hit!");
 
   let userMessage = req.body.Body || "";
   const userNumber = req.body.From;
 
-  // 💸 Daily limit
+  // 💸 Limits
   if (isDailyLimited(userNumber)) {
-    res.type("text/xml");
     return res.send(`
       <Response>
-        <Message>You’ve reached your daily limit. Try again tomorrow.</Message>
+        <Message>You’ve reached your daily limit.</Message>
       </Response>
     `);
   }
 
-  // 🔒 Rate limit
   if (isRateLimited(userNumber)) {
-    res.type("text/xml");
     return res.send(`
       <Response>
-        <Message>Please slow down. Try again in a few seconds.</Message>
+        <Message>Please slow down.</Message>
       </Response>
     `);
   }
 
-  // 📊 Log
-  fs.appendFileSync("logs.txt", `${new Date()} | ${userNumber} | ${userMessage}\n`);
-
-  const msgLower = userMessage.toLowerCase().trim();
-
-  // 👋 Greeting handler
+  // 👋 Greeting
   const greetings = ["hi", "hello", "hey"];
-  if (greetings.includes(msgLower)) {
-    res.type("text/xml");
+  if (greetings.includes(userMessage.toLowerCase().trim())) {
     return res.send(`
       <Response>
-        <Message>Hi 👋 I’m your Nigerian law assistant. You can ask me about cases, explanations, or exam questions.</Message>
+        <Message>Hi 👋 I’m your Nigerian law assistant. Ask me anything about law.</Message>
       </Response>
     `);
   }
 
-  // 🧠 Clarification check
+  // ❗ Clarification
   if (needsClarification(userMessage)) {
-    res.type("text/xml");
     return res.send(`
       <Response>
-        <Message>Could you clarify your question? For example: "Explain negligence in Nigerian law" or "Discuss contract law."</Message>
+        <Message>Could you clarify? Example: "Explain negligence in Nigerian law."</Message>
       </Response>
     `);
   }
 
-  const language = detectLanguage(userMessage);
-  const mode = detectMode(userMessage);
-  const systemPrompt = buildPrompt(mode, language);
+  // ⚡ SEND INSTANT "THINKING"
+  res.send(`
+    <Response>
+      <Message>⚖️ Analyzing your question...</Message>
+    </Response>
+  `);
 
-  // 🧠 Memory setup
-  if (!conversations[userNumber]) conversations[userNumber] = [];
+  // 🧠 Background processing
+  (async () => {
+    try {
 
-  conversations[userNumber].push({
-    role: "user",
-    content: userMessage,
-  });
+      const language = detectLanguage(userMessage);
+      const mode = detectMode(userMessage);
+      const systemPrompt = buildPrompt(mode, language);
 
-  try {
-    const aiResponse = await axios.post(
-      "https://api.openai.com/v1/chat/completions",
-      {
-        model: "gpt-4o-mini",
-        max_tokens: 800,
-        messages: [
-          systemPrompt,
-          ...conversations[userNumber].slice(-6),
-        ],
-      },
-      {
-        headers: {
-          Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-          "Content-Type": "application/json",
+      if (!conversations[userNumber]) conversations[userNumber] = [];
+
+      conversations[userNumber].push({
+        role: "user",
+        content: userMessage
+      });
+
+      const aiResponse = await axios.post(
+        "https://api.openai.com/v1/chat/completions",
+        {
+          model: "gpt-4o-mini",
+          max_tokens: 800,
+          messages: [
+            systemPrompt,
+            ...conversations[userNumber].slice(-6)
+          ],
         },
+        {
+          headers: {
+            Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+            "Content-Type": "application/json",
+          },
+        }
+      );
+
+      let reply = aiResponse.data.choices[0].message.content;
+
+      conversations[userNumber].push({
+        role: "assistant",
+        content: reply
+      });
+
+      // 🚀 PROGRESSIVE RESPONSE
+      const sections = reply.split("\n\n");
+
+      for (let section of sections) {
+        await client.messages.create({
+          body: section,
+          from: "whatsapp:+14155238886",
+          to: userNumber
+        });
+
+        await new Promise(r => setTimeout(r, 800)); // delay for realism
       }
-    );
 
-    let reply = aiResponse.data.choices[0].message.content;
-
-    // 🧠 Save response
-    conversations[userNumber].push({
-      role: "assistant",
-      content: reply,
-    });
-
-    const MessagingResponse = require("twilio").twiml.MessagingResponse;
-    const twiml = new MessagingResponse();
-
-    // ✂️ Smart splitting
-    const parts = reply.split("\n");
-    let current = "";
-
-    parts.forEach(p => {
-      if ((current + p).length > 1500) {
-        twiml.message(current.trim());
-        current = p;
-      } else {
-        current += "\n" + p;
-      }
-    });
-
-    if (current) twiml.message(current.trim());
-
-    res.type("text/xml");
-    res.send(twiml.toString());
-
-  } catch (error) {
-    console.error(error.response?.data || error.message);
-
-    res.type("text/xml");
-    res.send(`
-      <Response>
-        <Message>Sorry, something went wrong.</Message>
-      </Response>
-    `);
-  }
+    } catch (err) {
+      await client.messages.create({
+        body: "I ran into an issue. Try rephrasing your question.",
+        from: "whatsapp:+14155238886",
+        to: userNumber
+      });
+    }
+  })();
 });
 
-// 🚀 Start server
+// 🚀 START
 app.listen(3000, () => {
   console.log("Server running on port 3000");
 });
