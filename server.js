@@ -1,8 +1,8 @@
 require("dotenv").config();
 const express = require("express");
 const axios = require("axios");
-const fs = require("fs");
 const twilio = require("twilio");
+const FormData = require("form-data");
 
 const app = express();
 app.use(express.urlencoded({ extended: true }));
@@ -36,7 +36,7 @@ function getReaction(message) {
   if (/😂|🤣/.test(message)) return "😄 Got it, let’s look at this...";
   if (/😭|😩/.test(message)) return "😅 Don’t worry, I’ll simplify it...";
   if (/🔥/.test(message)) return "🔥 Nice one, let’s dive in...";
-  return "⚖️ Analyzing...";
+  return "⚖️ Analyzing your question...";
 }
 
 function detectMode(message) {
@@ -131,28 +131,55 @@ function isDailyLimited(user) {
   return dailyUsage[user].count > DAILY_LIMIT;
 }
 
-// ================= VOICE =================
-async function transcribeAudio(mediaUrl) {
-  const audio = await axios.get(mediaUrl, {
-    responseType: "arraybuffer",
-    auth: {
-      username: process.env.TWILIO_ACCOUNT_SID,
-      password: process.env.TWILIO_AUTH_TOKEN,
-    },
-  });
-
-  const response = await axios.post(
-    "https://api.openai.com/v1/audio/transcriptions",
-    audio.data,
-    {
-      headers: {
-        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-        "Content-Type": "audio/ogg",
+// ================= VOICE (FIXED) =================
+async function transcribeAudio(mediaUrl, contentType) {
+  try {
+    const audioResponse = await axios.get(mediaUrl, {
+      responseType: "arraybuffer",
+      auth: {
+        username: process.env.TWILIO_ACCOUNT_SID,
+        password: process.env.TWILIO_AUTH_TOKEN,
       },
-    }
-  );
+    });
 
-  return response.data.text;
+    let fileType = "audio/ogg";
+    let fileName = "audio.ogg";
+
+    if (contentType) {
+      if (contentType.includes("mpeg")) {
+        fileType = "audio/mpeg";
+        fileName = "audio.mp3";
+      } else if (contentType.includes("wav")) {
+        fileType = "audio/wav";
+        fileName = "audio.wav";
+      }
+    }
+
+    const form = new FormData();
+    form.append("file", audioResponse.data, {
+      filename: fileName,
+      contentType: fileType,
+    });
+
+    form.append("model", "gpt-4o-mini-transcribe");
+
+    const response = await axios.post(
+      "https://api.openai.com/v1/audio/transcriptions",
+      form,
+      {
+        headers: {
+          ...form.getHeaders(),
+          Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+        },
+      }
+    );
+
+    return response.data.text;
+
+  } catch (error) {
+    console.error("TRANSCRIPTION ERROR:", error.response?.data || error.message);
+    throw error;
+  }
 }
 
 // ================= WEBHOOK =================
@@ -160,12 +187,25 @@ app.post("/webhook", async (req, res) => {
   let userMessage = req.body.Body || "";
   const userNumber = req.body.From;
 
-  // 🎤 Voice note
+  // 🎤 VOICE HANDLING
   if (req.body.NumMedia && req.body.NumMedia !== "0") {
     try {
-      userMessage = await transcribeAudio(req.body.MediaUrl0);
+      const mediaUrl = req.body.MediaUrl0;
+      const contentType = req.body.MediaContentType0;
+
+      console.log("Media URL:", mediaUrl);
+      console.log("Content Type:", contentType);
+
+      userMessage = await transcribeAudio(mediaUrl, contentType);
+
+      await client.messages.create({
+        body: `🎤 I heard: "${userMessage}"`,
+        from: "whatsapp:+14155238886",
+        to: userNumber,
+      });
+
     } catch {
-      return res.send(`<Response><Message>Couldn't process voice note.</Message></Response>`);
+      return res.send(`<Response><Message>⚠️ Couldn't process voice note.</Message></Response>`);
     }
   }
 
@@ -177,12 +217,12 @@ app.post("/webhook", async (req, res) => {
     return res.send(`<Response><Message>Hi 👋 Ask me anything about law.</Message></Response>`);
   }
 
-  // 💬 Emotion quick response
+  // 💬 Emotion reaction
   if (emotion === "impressed") {
     return res.send(`<Response><Message>😄 Glad you like it! Want more?</Message></Response>`);
   }
 
-  // 💸 Limits
+  // 🚫 Limits
   if (isDailyLimited(userNumber)) {
     return res.send(`<Response><Message>Daily limit reached.</Message></Response>`);
   }
@@ -196,20 +236,18 @@ app.post("/webhook", async (req, res) => {
     return res.send(`<Response><Message>Please clarify your question.</Message></Response>`);
   }
 
-  // 🧠 Personality update
   updateUserProfile(userNumber, userMessage);
 
-  // ⚡ Reaction
+  // ⚡ Reaction first
   res.send(`<Response><Message>${getReaction(userMessage)}</Message></Response>`);
 
-  // ================= AI PROCESS =================
+  // ================= AI =================
   (async () => {
     try {
       const mode = detectMode(userMessage);
       const systemPrompt = buildPrompt(mode, userProfiles[userNumber]);
 
       if (!conversations[userNumber]) conversations[userNumber] = [];
-
       conversations[userNumber].push({ role: "user", content: userMessage });
 
       const aiResponse = await axios.post(
@@ -227,19 +265,17 @@ app.post("/webhook", async (req, res) => {
       );
 
       let reply = aiResponse.data.choices[0].message.content;
-
       conversations[userNumber].push({ role: "assistant", content: reply });
 
-      // 🧠 Extract follow-up
+      // Extract follow-up
       let followUp = "";
       const matches = reply.match(/[^.?!]*\?/g);
-
       if (matches && matches.length > 0) {
         followUp = matches[matches.length - 1].trim();
         reply = reply.replace(followUp, "").trim();
       }
 
-      // 🧠 Split response properly
+      // Split properly
       let lines = reply.split("\n").filter(l => l.trim() !== "");
       let messages = [];
       let current = "";
@@ -255,18 +291,17 @@ app.post("/webhook", async (req, res) => {
 
       if (current) messages.push(current.trim());
 
-      // 🚀 Send messages
+      // Send in order
       for (let msg of messages) {
         await client.messages.create({
           body: msg,
           from: "whatsapp:+14155238886",
           to: userNumber,
         });
-
         await new Promise(r => setTimeout(r, 700));
       }
 
-      // ✅ Follow-up LAST
+      // Follow-up LAST
       if (followUp) {
         await client.messages.create({
           body: followUp,
@@ -276,6 +311,7 @@ app.post("/webhook", async (req, res) => {
       }
 
     } catch (err) {
+      console.error(err);
       await client.messages.create({
         body: "Something went wrong. Try again.",
         from: "whatsapp:+14155238886",
