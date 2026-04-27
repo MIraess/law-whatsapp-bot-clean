@@ -10,7 +10,7 @@ const path = require("path");
 const app = express();
 app.use(express.urlencoded({ extended: true }));
 
-// ===== CONFIG =====
+// ================= CONFIG =================
 const client = twilio(
   process.env.TWILIO_ACCOUNT_SID,
   process.env.TWILIO_AUTH_TOKEN
@@ -22,16 +22,24 @@ cloudinary.config({
   api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
-// ===== STATE =====
+// ================= STATE =================
 const conversations = {};
 const userProfiles = {};
 const userLimits = {};
 const dailyUsage = {};
 const DAILY_LIMIT = 20;
 
-// ===== HELPERS =====
+// ================= STAGE 1: INPUT PROCESSING =================
 function normalize(msg) {
   return (msg || "").toLowerCase().trim();
+}
+
+function detectEmotion(msg) {
+  if (/😂|🤣/.test(msg)) return "funny";
+  if (/😭|😩/.test(msg)) return "confused";
+  if (/🔥/.test(msg)) return "impressed";
+  if (/😊|🙂/.test(msg)) return "friendly";
+  return "neutral";
 }
 
 function isGreeting(msg) {
@@ -53,65 +61,20 @@ function hasOnlyEmoji(msg) {
   return /^[\p{Emoji}\s]+$/u.test(msg);
 }
 
+// ================= STAGE 2: CONTROL LOGIC =================
 function needsClarification(msg) {
   const m = normalize(msg);
+
   if (isGreeting(m) || isGratitude(m)) return false;
   if (hasOnlyEmoji(msg)) return false;
   if (m.split(" ").length <= 1) return false;
+
   return ["law", "case", "help"].includes(m);
 }
 
-function detectTone(msg) {
-  if (/😭|😩/.test(msg)) return "simple";
-  if (/argue|critically|discuss/i.test(msg)) return "exam";
-  return "default";
-}
-
-// ===== PERSONALITY =====
-function updateUserProfile(user, msg) {
-  if (!userProfiles[user]) {
-    userProfiles[user] = {
-      style: "default",
-      prefersSimple: false,
-      prefersExam: false,
-    };
-  }
-
-  const tone = detectTone(msg);
-
-  if (tone === "simple") userProfiles[user].prefersSimple = true;
-  if (tone === "exam") userProfiles[user].prefersExam = true;
-}
-
-function buildPrompt(profile) {
-  let style = "default";
-
-  if (profile?.prefersExam) style = "exam";
-  else if (profile?.prefersSimple) style = "simple";
-
-  let base = "";
-
-  if (style === "exam") {
-    base = "Answer using IRAC (Issue, Rule, Application, Conclusion).";
-  } else if (style === "simple") {
-    base = "Explain in very simple terms with relatable examples.";
-  } else {
-    base = "Explain clearly and concisely.";
-  }
-
-  base += "\nStructure your answer clearly:";
-  base += "\n- Introduction";
-  base += "\n- Explanation";
-  base += "\n- Conclusion";
-  base += "\nUse light emojis (⚖️📚).";
-  base += "\nEnd with ONE follow-up question.";
-
-  return { role: "system", content: base };
-}
-
-// ===== LIMITS =====
 function isRateLimited(user) {
   const now = Date.now();
+
   if (!userLimits[user]) {
     userLimits[user] = { count: 1, time: now };
     return false;
@@ -143,7 +106,56 @@ function isDailyLimited(user) {
   return dailyUsage[user].count > DAILY_LIMIT;
 }
 
-// ===== VOICE INPUT =====
+// ================= STAGE 3: PERSONALITY =================
+function updateUserProfile(user, msg) {
+  if (!userProfiles[user]) {
+    userProfiles[user] = {
+      prefersSimple: false,
+      prefersExam: false,
+      emotionalTone: "neutral",
+    };
+  }
+
+  const emotion = detectEmotion(msg);
+  userProfiles[user].emotionalTone = emotion;
+
+  if (/explain/i.test(msg) || emotion === "confused") {
+    userProfiles[user].prefersSimple = true;
+  }
+
+  if (/argue|critically|discuss/i.test(msg)) {
+    userProfiles[user].prefersExam = true;
+  }
+}
+
+function buildPrompt(profile) {
+  let styleInstruction = "";
+
+  if (profile.prefersExam) {
+    styleInstruction = "Answer using IRAC (Issue, Rule, Application, Conclusion).";
+  } else if (profile.prefersSimple) {
+    styleInstruction = "Explain in very simple terms with relatable examples.";
+  } else {
+    styleInstruction = "Explain clearly and concisely.";
+  }
+
+  return {
+    role: "system",
+    content: `
+${styleInstruction}
+
+Structure strictly as:
+Introduction
+Explanation
+Conclusion
+
+Use light emojis (⚖️📚).
+End with ONE follow-up question.
+    `,
+  };
+}
+
+// ================= STAGE 4: VOICE =================
 async function transcribeAudio(url, type) {
   const audio = await axios.get(url, {
     responseType: "arraybuffer",
@@ -174,7 +186,6 @@ async function transcribeAudio(url, type) {
   return res.data.text;
 }
 
-// ===== VOICE OUTPUT =====
 async function generateVoice(text) {
   const res = await axios.post(
     "https://api.openai.com/v1/audio/speech",
@@ -204,7 +215,68 @@ async function generateVoice(text) {
   return upload.secure_url;
 }
 
-// ===== MAIN WEBHOOK =====
+// ================= STAGE 5: RESPONSE STRUCTURE =================
+function extractFollowUp(reply) {
+  let followUp = "";
+  const matches = reply.match(/[^.?!]*\?/g);
+
+  if (matches && matches.length > 0) {
+    followUp = matches[matches.length - 1].trim();
+    reply = reply.replace(followUp, "").trim();
+  }
+
+  return { reply, followUp };
+}
+
+function chunkResponse(text) {
+  const lines = text.split("\n").filter(l => l.trim() !== "");
+  const chunks = [];
+  let current = "";
+
+  for (let line of lines) {
+    if ((current + "\n" + line).length > 1200) {
+      chunks.push(current.trim());
+      current = line;
+    } else {
+      current += "\n" + line;
+    }
+  }
+
+  if (current) chunks.push(current.trim());
+  return chunks;
+}
+
+// ================= STAGE 6: DELIVERY =================
+async function sendResponse(user, chunks, followUp) {
+  for (let part of chunks) {
+    await client.messages.create({
+      body: part,
+      from: "whatsapp:+14155238886",
+      to: user,
+    });
+
+    try {
+      const voiceUrl = await generateVoice(part);
+      await client.messages.create({
+        mediaUrl: [voiceUrl],
+        from: "whatsapp:+14155238886",
+        to: user,
+      });
+    } catch {}
+
+    await new Promise(r => setTimeout(r, 800));
+  }
+
+  if (followUp) {
+    await client.messages.create({
+      body: followUp,
+      from: "whatsapp:+14155238886",
+      to: user,
+    });
+  }
+}
+
+// ================= MAIN WEBHOOK =================
 app.post("/webhook", async (req, res) => {
   let msg = req.body.Body || "";
   const user = req.body.From;
@@ -223,7 +295,7 @@ app.post("/webhook", async (req, res) => {
       return res.send(`<Response><Message>Hi 👋 Ask me anything about law.</Message></Response>`);
 
     if (isGratitude(msg))
-      return res.send(`<Response><Message>😊 You're welcome! Always here to help.</Message></Response>`);
+      return res.send(`<Response><Message>😊 You're welcome!</Message></Response>`);
 
     if (isDailyLimited(user))
       return res.send(`<Response><Message>Daily limit reached.</Message></Response>`);
@@ -232,101 +304,45 @@ app.post("/webhook", async (req, res) => {
       return res.send(`<Response><Message>Please slow down.</Message></Response>`);
 
     if (needsClarification(msg))
-      return res.send(`<Response><Message>Could you clarify your question?</Message></Response>`);
+      return res.send(`<Response><Message>Please clarify your question.</Message></Response>`);
 
     updateUserProfile(user, msg);
 
     res.send(`<Response><Message>⚖️ Let me think about that...</Message></Response>`);
 
-    // Async AI processing
+    // Async processing
     (async () => {
-      try {
-        if (!conversations[user]) conversations[user] = [];
-        conversations[user].push({ role: "user", content: msg });
+      if (!conversations[user]) conversations[user] = [];
+      conversations[user].push({ role: "user", content: msg });
 
-        const profile = userProfiles[user];
+      const profile = userProfiles[user];
 
-        const ai = await axios.post(
-          "https://api.openai.com/v1/chat/completions",
-          {
-            model: "gpt-4o-mini",
-            max_tokens: 900,
-            messages: [buildPrompt(profile), ...conversations[user].slice(-6)],
+      const ai = await axios.post(
+        "https://api.openai.com/v1/chat/completions",
+        {
+          model: "gpt-4o-mini",
+          max_tokens: 900,
+          messages: [buildPrompt(profile), ...conversations[user].slice(-6)],
+        },
+        {
+          headers: {
+            Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
           },
-          {
-            headers: {
-              Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-            },
-          }
-        );
-
-        let reply = ai.data.choices[0].message.content;
-
-        // Extract follow-up
-        let followUp = "";
-        const q = reply.match(/[^.?!]*\?/g);
-        if (q) {
-          followUp = q[q.length - 1];
-          reply = reply.replace(followUp, "").trim();
         }
+      );
 
-        // Chunking
-        const chunks = [];
-        let current = "";
+      let reply = ai.data.choices[0].message.content;
 
-        reply.split("\n").forEach(line => {
-          if ((current + line).length > 1200) {
-            chunks.push(current);
-            current = line;
-          } else {
-            current += "\n" + line;
-          }
-        });
-        if (current) chunks.push(current);
+      const structured = extractFollowUp(reply);
+      const chunks = chunkResponse(structured.reply);
 
-        // Send chunks sequentially
-        for (let part of chunks) {
-          await client.messages.create({
-            body: part.trim(),
-            from: "whatsapp:+14155238886",
-            to: user,
-          });
-
-          try {
-            const voice = await generateVoice(part);
-            await client.messages.create({
-              mediaUrl: [voice],
-              from: "whatsapp:+14155238886",
-              to: user,
-            });
-          } catch {}
-
-          await new Promise(r => setTimeout(r, 800));
-        }
-
-        // Follow-up LAST
-        if (followUp) {
-          await client.messages.create({
-            body: followUp,
-            from: "whatsapp:+14155238886",
-            to: user,
-          });
-        }
-
-      } catch (err) {
-        console.error("AI ERROR:", err.message);
-        await client.messages.create({
-          body: "⚠️ Something went wrong. Please try again.",
-          from: "whatsapp:+14155238886",
-          to: user,
-        });
-      }
+      await sendResponse(user, chunks, structured.followUp);
     })();
 
   } catch (err) {
-    console.error("WEBHOOK ERROR:", err.message);
+    console.error(err.message);
     return res.send(`<Response><Message>Error occurred.</Message></Response>`);
   }
 });
 
-app.listen(3000, () => console.log("Server running on port 3000"));
+app.listen(3000, () => console.log("Server running"));
