@@ -4,6 +4,8 @@ const axios = require("axios");
 const twilio = require("twilio");
 const FormData = require("form-data");
 const cloudinary = require("cloudinary").v2;
+const fs = require("fs");
+const path = require("path");
 
 const app = express();
 app.use(express.urlencoded({ extended: true }));
@@ -27,22 +29,9 @@ const userLimits = {};
 const dailyUsage = {};
 const DAILY_LIMIT = 20;
 
-// ================= HELPERS =================
-function cleanMessage(msg) {
-  return (msg || "")
-    .toLowerCase()
-    .replace(/[^\w\s😂🤣😭😩🔥😊🙂]/gi, "")
-    .trim();
-}
-
-function isGreeting(msg) {
-  const m = cleanMessage(msg);
-  return ["hi", "hello", "hey"].includes(m);
-}
-
-function isGratitude(msg) {
-  const m = cleanMessage(msg);
-  return ["thanks", "thank you", "thx", "ty"].includes(m);
+// ================= STAGE 1: INPUT PROCESSING =================
+function normalize(msg) {
+  return (msg || "").toLowerCase().trim();
 }
 
 function detectEmotion(msg) {
@@ -53,173 +42,260 @@ function detectEmotion(msg) {
   return "neutral";
 }
 
-function getReaction(msg) {
-  if (/😂|🤣/.test(msg)) return "😄 Got it, let’s look at this...";
-  if (/😭|😩/.test(msg)) return "😅 Don’t worry, I’ll simplify it...";
-  if (/🔥/.test(msg)) return "🔥 Nice one, let’s dive in...";
-  return "⚖️ Analyzing your question...";
+function isGreeting(msg) {
+  const m = normalize(msg);
+  return ["hi", "hello", "hey"].includes(m);
 }
 
-// SMART clarification (emoji-aware)
+function isGratitude(msg) {
+  const m = normalize(msg);
+  return (
+    m.includes("thank") ||
+    m.includes("thanks") ||
+    m.includes("thx") ||
+    m.includes("ty")
+  );
+}
+
+function hasOnlyEmoji(msg) {
+  return /^[\p{Emoji}\s]+$/u.test(msg);
+}
+
+// ================= STAGE 2: CONTROL LOGIC =================
 function needsClarification(msg) {
-  const m = cleanMessage(msg);
+  const m = normalize(msg);
+
   if (isGreeting(m) || isGratitude(m)) return false;
-  if (/[😂🤣😭😩🔥😊🙂]/.test(msg) && m.split(" ").length <= 2) return false;
+  if (hasOnlyEmoji(msg)) return false;
   if (m.split(" ").length <= 1) return false;
+
   return ["law", "case", "help"].includes(m);
 }
 
-// PERSONALITY
-function updateUserProfile(user, msg) {
-  if (!userProfiles[user]) userProfiles[user] = { style: "default" };
-
-  if (/explain/i.test(msg)) userProfiles[user].style = "simple";
-  if (/argue|discuss|critically/i.test(msg)) userProfiles[user].style = "exam";
-  if (/😭|😩/.test(msg)) userProfiles[user].style = "simple";
-}
-
-function buildPrompt(style) {
-  let base = "";
-
-  if (style === "exam") {
-    base = "Answer using IRAC: Issue, Rule, Application, Conclusion.";
-  } else if (style === "simple") {
-    base = "Explain in very simple terms with relatable examples.";
-  } else {
-    base = "Explain clearly and concisely.";
-  }
-
-  base += "\nUse light professional emojis (⚖️📚✅).";
-  base += "\nStructure clearly with headings where appropriate.";
-  base += "\nEnd with a short follow-up question.";
-  base += "\nEnd also with: This is for educational purposes only.";
-
-  return { role: "system", content: base };
-}
-
-// ================= LIMITS =================
 function isRateLimited(user) {
   const now = Date.now();
+
   if (!userLimits[user]) {
     userLimits[user] = { count: 1, time: now };
     return false;
   }
-  const diff = now - userLimits[user].time;
-  if (diff > 30000) {
+
+  if (now - userLimits[user].time > 30000) {
     userLimits[user] = { count: 1, time: now };
     return false;
   }
+
   userLimits[user].count++;
   return userLimits[user].count > 5;
 }
 
 function isDailyLimited(user) {
   const today = new Date().toDateString();
+
   if (!dailyUsage[user]) {
     dailyUsage[user] = { date: today, count: 1 };
     return false;
   }
+
   if (dailyUsage[user].date !== today) {
     dailyUsage[user] = { date: today, count: 1 };
     return false;
   }
+
   dailyUsage[user].count++;
   return dailyUsage[user].count > DAILY_LIMIT;
 }
 
-// ================= VOICE INPUT =================
+// ================= STAGE 3: PERSONALITY =================
+function updateUserProfile(user, msg) {
+  if (!userProfiles[user]) {
+    userProfiles[user] = {
+      prefersSimple: false,
+      prefersExam: false,
+      emotionalTone: "neutral",
+    };
+  }
+
+  const emotion = detectEmotion(msg);
+  userProfiles[user].emotionalTone = emotion;
+
+  if (/explain/i.test(msg) || emotion === "confused") {
+    userProfiles[user].prefersSimple = true;
+  }
+
+  if (/argue|critically|discuss/i.test(msg)) {
+    userProfiles[user].prefersExam = true;
+  }
+}
+
+function buildPrompt(profile) {
+  let styleInstruction = "";
+
+  if (profile.prefersExam) {
+    styleInstruction = "Answer using IRAC (Issue, Rule, Application, Conclusion).";
+  } else if (profile.prefersSimple) {
+    styleInstruction = "Explain in very simple terms with relatable examples.";
+  } else {
+    styleInstruction = "Explain clearly and concisely.";
+  }
+
+  return {
+    role: "system",
+    content: `
+${styleInstruction}
+
+Structure strictly as:
+Introduction
+Explanation
+Conclusion
+
+Use light emojis (⚖️📚).
+End with ONE follow-up question.
+    `,
+  };
+}
+
+// ================= STAGE 4: VOICE =================
 async function transcribeAudio(url, type) {
-  try {
-    const audio = await axios.get(url, {
-      responseType: "arraybuffer",
-      auth: {
-        username: process.env.TWILIO_ACCOUNT_SID,
-        password: process.env.TWILIO_AUTH_TOKEN,
+  const audio = await axios.get(url, {
+    responseType: "arraybuffer",
+    auth: {
+      username: process.env.TWILIO_ACCOUNT_SID,
+      password: process.env.TWILIO_AUTH_TOKEN,
+    },
+  });
+
+  const form = new FormData();
+  form.append("file", audio.data, {
+    filename: "audio.ogg",
+    contentType: type || "audio/ogg",
+  });
+  form.append("model", "gpt-4o-mini-transcribe");
+
+  const res = await axios.post(
+    "https://api.openai.com/v1/audio/transcriptions",
+    form,
+    {
+      headers: {
+        ...form.getHeaders(),
+        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
       },
-    });
+    }
+  );
 
-    const form = new FormData();
-    form.append("file", audio.data, {
-      filename: "audio.ogg",
-      contentType: type || "audio/ogg",
-    });
-    form.append("model", "gpt-4o-mini-transcribe");
-
-    const res = await axios.post(
-      "https://api.openai.com/v1/audio/transcriptions",
-      form,
-      {
-        headers: {
-          ...form.getHeaders(),
-          Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-        },
-      }
-    );
-
-    return res.data.text;
-  } catch (err) {
-    console.error("TRANSCRIPTION ERROR:", err?.response?.data || err.message);
-    throw err;
-  }
+  return res.data.text;
 }
 
-// ================= VOICE OUTPUT =================
 async function generateVoice(text) {
-  try {
-    const res = await axios.post(
-      "https://api.openai.com/v1/audio/speech",
-      {
-        model: "gpt-4o-mini-tts",
-        voice: "alloy",
-        input: text,
+  const res = await axios.post(
+    "https://api.openai.com/v1/audio/speech",
+    {
+      model: "gpt-4o-mini-tts",
+      voice: "alloy",
+      input: text,
+    },
+    {
+      headers: {
+        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
       },
-      {
-        headers: {
-          Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-        },
-        responseType: "arraybuffer",
-      }
-    );
+      responseType: "arraybuffer",
+    }
+  );
 
-    const base64 = Buffer.from(res.data).toString("base64");
+  const tempPath = path.join(__dirname, `temp-${Date.now()}.mp3`);
+  fs.writeFileSync(tempPath, res.data);
 
-    const upload = await cloudinary.uploader.upload(
-      `data:audio/mp3;base64,${base64}`,
-      { resource_type: "video", folder: "voice-replies" }
-    );
+  const upload = await cloudinary.uploader.upload(tempPath, {
+    resource_type: "video",
+    folder: "voice-replies",
+  });
 
-    return upload.secure_url;
-  } catch (err) {
-    console.error("VOICE ERROR:", err?.response?.data || err.message);
-    throw err;
+  fs.unlinkSync(tempPath);
+
+  return upload.secure_url;
+}
+
+// ================= STAGE 5: RESPONSE STRUCTURE =================
+function extractFollowUp(reply) {
+  let followUp = "";
+  const matches = reply.match(/[^.?!]*\?/g);
+
+  if (matches && matches.length > 0) {
+    followUp = matches[matches.length - 1].trim();
+    reply = reply.replace(followUp, "").trim();
+  }
+
+  return { reply, followUp };
+}
+
+function chunkResponse(text) {
+  const lines = text.split("\n").filter(l => l.trim() !== "");
+  const chunks = [];
+  let current = "";
+
+  for (let line of lines) {
+    if ((current + "\n" + line).length > 1200) {
+      chunks.push(current.trim());
+      current = line;
+    } else {
+      current += "\n" + line;
+    }
+  }
+
+  if (current) chunks.push(current.trim());
+  return chunks;
+}
+
+// ================= STAGE 6: DELIVERY =================
+async function sendResponse(user, chunks, followUp) {
+  for (let part of chunks) {
+    await client.messages.create({
+      body: part,
+      from: "whatsapp:+14155238886",
+      to: user,
+    });
+
+    try {
+      const voiceUrl = await generateVoice(part);
+      await client.messages.create({
+        mediaUrl: [voiceUrl],
+        from: "whatsapp:+14155238886",
+        to: user,
+      });
+    } catch {}
+
+    await new Promise(r => setTimeout(r, 800));
+  }
+
+  if (followUp) {
+    await client.messages.create({
+      body: followUp,
+      from: "whatsapp:+14155238886",
+      to: user,
+    });
   }
 }
 
-// ================= WEBHOOK =================
+// ================= MAIN WEBHOOK =================
 app.post("/webhook", async (req, res) => {
   let msg = req.body.Body || "";
   const user = req.body.From;
 
   try {
-    // 🎤 Voice input
+    // Voice input
     if (req.body.NumMedia && req.body.NumMedia !== "0") {
       msg = await transcribeAudio(
         req.body.MediaUrl0,
         req.body.MediaContentType0
       );
-
-      await client.messages.create({
-        body: `🎤 I heard: "${msg}"`,
-        from: "whatsapp:+14155238886",
-        to: user,
-      });
     }
 
+    // Priority responses
     if (isGreeting(msg))
       return res.send(`<Response><Message>Hi 👋 Ask me anything about law.</Message></Response>`);
 
     if (isGratitude(msg))
-      return res.send(`<Response><Message>😊 You're welcome! Always here to help.</Message></Response>`);
+      return res.send(`<Response><Message>😊 You're welcome!</Message></Response>`);
 
     if (isDailyLimited(user))
       return res.send(`<Response><Message>Daily limit reached.</Message></Response>`);
@@ -228,101 +304,43 @@ app.post("/webhook", async (req, res) => {
       return res.send(`<Response><Message>Please slow down.</Message></Response>`);
 
     if (needsClarification(msg))
-      return res.send(`<Response><Message>Could you clarify your question?</Message></Response>`);
+      return res.send(`<Response><Message>Please clarify your question.</Message></Response>`);
 
     updateUserProfile(user, msg);
 
-    // quick reaction
-    res.send(`<Response><Message>${getReaction(msg)}</Message></Response>`);
+    res.send(`<Response><Message>⚖️ Let me think about that...</Message></Response>`);
 
-    // async processing
+    // Async processing
     (async () => {
-      try {
-        const style = userProfiles[user]?.style || "default";
+      if (!conversations[user]) conversations[user] = [];
+      conversations[user].push({ role: "user", content: msg });
 
-        if (!conversations[user]) conversations[user] = [];
-        conversations[user].push({ role: "user", content: msg });
+      const profile = userProfiles[user];
 
-        const ai = await axios.post(
-          "https://api.openai.com/v1/chat/completions",
-          {
-            model: "gpt-4o-mini",
-            max_tokens: 900,
-            messages: [buildPrompt(style), ...conversations[user].slice(-6)],
+      const ai = await axios.post(
+        "https://api.openai.com/v1/chat/completions",
+        {
+          model: "gpt-4o-mini",
+          max_tokens: 900,
+          messages: [buildPrompt(profile), ...conversations[user].slice(-6)],
+        },
+        {
+          headers: {
+            Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
           },
-          {
-            headers: {
-              Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-            },
-          }
-        );
-
-        let reply = ai.data.choices[0].message.content;
-
-        // ===== Extract follow-up (LAST) =====
-        let followUp = "";
-        const matches = reply.match(/[^.?!]*\?/g);
-        if (matches && matches.length > 0) {
-          followUp = matches[matches.length - 1].trim();
-          reply = reply.replace(followUp, "").trim();
         }
+      );
 
-        // ===== Smart chunking =====
-        const lines = reply.split("\n").filter(l => l.trim() !== "");
-        let chunks = [];
-        let current = "";
+      let reply = ai.data.choices[0].message.content;
 
-        for (let line of lines) {
-          if ((current + "\n" + line).length > 1200) {
-            chunks.push(current.trim());
-            current = line;
-          } else {
-            current += "\n" + line;
-          }
-        }
-        if (current) chunks.push(current.trim());
+      const structured = extractFollowUp(reply);
+      const chunks = chunkResponse(structured.reply);
 
-        // ===== Send in order =====
-        for (let part of chunks) {
-          await client.messages.create({
-            body: part,
-            from: "whatsapp:+14155238886",
-            to: user,
-          });
-
-          try {
-            const voiceUrl = await generateVoice(part);
-            await client.messages.create({
-              mediaUrl: [voiceUrl],
-              from: "whatsapp:+14155238886",
-              to: user,
-            });
-          } catch {}
-
-          await new Promise(r => setTimeout(r, 800));
-        }
-
-        // ===== Follow-up LAST =====
-        if (followUp) {
-          await client.messages.create({
-            body: followUp,
-            from: "whatsapp:+14155238886",
-            to: user,
-          });
-        }
-
-      } catch (err) {
-        console.error("AI ERROR:", err?.response?.data || err.message);
-        await client.messages.create({
-          body: "⚠️ Something went wrong. Please try again.",
-          from: "whatsapp:+14155238886",
-          to: user,
-        });
-      }
+      await sendResponse(user, chunks, structured.followUp);
     })();
 
   } catch (err) {
-    console.error("WEBHOOK ERROR:", err?.response?.data || err.message);
+    console.error(err.message);
     return res.send(`<Response><Message>Error occurred.</Message></Response>`);
   }
 });
