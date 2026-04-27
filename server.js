@@ -264,7 +264,7 @@ async function sendResponse(user, chunks, followUp) {
       const voiceUrl = await generateVoice(part);
       await client.messages.create({
         mediaUrl: [voiceUrl],
-        body: "🔊 Voice note"
+        body: "🔊 Voice note",
         from: "whatsapp:+14155238886",
         to: user,
       });
