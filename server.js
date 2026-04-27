@@ -48,30 +48,26 @@ function isGreeting(msg) {
 }
 
 function isGratitude(msg) {
-  const m = normalize(msg);
-  return (
-    m.includes("thank") ||
-    m.includes("thanks") ||
-    m.includes("thx") ||
-    m.includes("ty")
-  );
+  const m = msg.toLowerCase();
+  return /(thank|thanks|thx|ty)/.test(m);
 }
-
 function hasOnlyEmoji(msg) {
   return /^[\p{Emoji}\s]+$/u.test(msg);
 }
 
 // ================= STAGE 2: CONTROL LOGIC =================
 function needsClarification(msg) {
-  const m = normalize(msg);
+  const m = msg.toLowerCase().trim();
 
-  if (isGreeting(m) || isGratitude(m)) return false;
-  if (hasOnlyEmoji(msg)) return false;
-  if (m.split(" ").length <= 1) return false;
+  if (isGreeting(m)) return false;
+  if (isGratitude(m)) return false;
+
+  // ignore emoji-only or short friendly texts
+  if (/^[\p{Emoji}\s]+$/u.test(msg)) return false;
+  if (m.split(" ").length <= 2) return false;
 
   return ["law", "case", "help"].includes(m);
 }
-
 function isRateLimited(user) {
   const now = Date.now();
 
@@ -187,34 +183,43 @@ async function transcribeAudio(url, type) {
 }
 
 async function generateVoice(text) {
-  const res = await axios.post(
-    "https://api.openai.com/v1/audio/speech",
-    {
-      model: "gpt-4o-mini-tts",
-      voice: "alloy",
-      input: text,
-    },
-    {
-      headers: {
-        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+  try {
+    const res = await axios.post(
+      "https://api.openai.com/v1/audio/speech",
+      {
+        model: "gpt-4o-mini-tts",
+        voice: "alloy",
+        input: text,
+        format: "mp3" // IMPORTANT
       },
-      responseType: "arraybuffer",
-    }
-  );
+      {
+        headers: {
+          Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+        },
+        responseType: "arraybuffer",
+      }
+    );
 
-  const tempPath = path.join(__dirname, `temp-${Date.now()}.mp3`);
-  fs.writeFileSync(tempPath, res.data);
+    const tempPath = path.join(__dirname, `temp-${Date.now()}.mp3`);
+    fs.writeFileSync(tempPath, res.data);
 
-  const upload = await cloudinary.uploader.upload(tempPath, {
-    resource_type: "video",
-    folder: "voice-replies",
-  });
+    const upload = await cloudinary.uploader.upload(tempPath, {
+      resource_type: "video",
+      format: "mp3", // IMPORTANT
+      public_id: `voice_${Date.now()}`
+    });
 
-  fs.unlinkSync(tempPath);
+    fs.unlinkSync(tempPath);
 
-  return upload.secure_url;
+    console.log("VOICE URL:", upload.secure_url);
+
+    return upload.secure_url;
+
+  } catch (err) {
+    console.error("VOICE ERROR:", err.response?.data || err.message);
+    throw err;
+  }
 }
-
 // ================= STAGE 5: RESPONSE STRUCTURE =================
 function extractFollowUp(reply) {
   let followUp = "";
@@ -259,6 +264,7 @@ async function sendResponse(user, chunks, followUp) {
       const voiceUrl = await generateVoice(part);
       await client.messages.create({
         mediaUrl: [voiceUrl],
+        body: "🔊 Voice note"
         from: "whatsapp:+14155238886",
         to: user,
       });
