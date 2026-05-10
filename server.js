@@ -44,7 +44,7 @@ function detectEmotion(msg) {
 
 function isGreeting(msg) {
   const m = normalize(msg);
-  return ["hi", "hello", "hey"].includes(m);
+  return ["hi", "hello", "hey", "good morning", "good afternoon", "good evening"].includes(m);
 }
 
 function isGratitude(msg) {
