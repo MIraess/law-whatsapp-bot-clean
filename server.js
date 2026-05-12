@@ -2,6 +2,7 @@ require("dotenv").config();
 const express = require("express");
 const axios = require("axios");
 const twilio = require("twilio");
+const MessagingResponse = twilio.twiml.MessagingResponse;
 const FormData = require("form-data");
 const cloudinary = require("cloudinary").v2;
 const fs = require("fs");
@@ -44,7 +45,28 @@ function detectEmotion(msg) {
 
 function isGreeting(msg) {
   const m = normalize(msg);
-  return ["hi", "hello", "hey", "good morning", "good afternoon", "good evening"].includes(m);
+
+  return (
+    /^(hi|hello|hey|yo|sup|hola)\b/.test(m) ||
+    /(good morning|good afternoon|good evening)/.test(m) ||
+    /(how are you|how far|what's up|wassup)/.test(m)
+  );
+}
+function detectIntent(msg) {
+  const m = normalize(msg);
+
+  if (isGreeting(m)) return "greeting";
+  if (isGratitude(m)) return "gratitude";
+
+  if (/\?$/.test(m)) return "question";
+
+  if (
+    /(explain|define|discuss|analyze|compare|what is|why)/i.test(m)
+  ) {
+    return "academic";
+  }
+
+  return "casual";
 }
 
 function isGratitude(msg) {
@@ -66,7 +88,17 @@ function needsClarification(msg) {
   if (/^[\p{Emoji}\s]+$/u.test(msg)) return false;
   if (m.split(" ").length <= 2) return false;
 
-  return ["law", "case", "help"].includes(m);
+  const vagueWords = [
+  "law",
+  "case",
+  "help",
+  "problem",
+  "issue",
+  "question",
+  "assignment"
+];
+
+return vagueWords.includes(m);
 }
 function isRateLimited(user) {
   const now = Date.now();
@@ -297,20 +329,45 @@ app.post("/webhook", async (req, res) => {
     }
 
     // Priority responses
-    if (isGreeting(msg))
-      return res.send(`<Response><Message>Hi 👋 Ask me anything about law.</Message></Response>`);
+    // Detect intent
+const intent = detectIntent(msg);
 
-    if (isGratitude(msg))
-      return res.send(`<Response><Message>😊 You're welcome!</Message></Response>`);
+// Greeting responses
+if (intent === "greeting") {
+  const greetings = [
+    "Hey 😊 How’s your day going?",
+    "Hello 👋 Great to hear from you!",
+    "Good evening 🌆 Hope you're doing well!",
+    "Hi 😄 What can I help you with today?",
+  ];
 
-    if (isDailyLimited(user))
-      return res.send(`<Response><Message>Daily limit reached.</Message></Response>`);
+  const randomGreeting =
+    greetings[Math.floor(Math.random() * greetings.length)];
 
-    if (isRateLimited(user))
-      return res.send(`<Response><Message>Please slow down.</Message></Response>`);
+  const twiml = new MessagingResponse();
+  twiml.message(randomGreeting);
 
-    if (needsClarification(msg))
-      return res.send(`<Response><Message>Please clarify your question.</Message></Response>`);
+  res.writeHead(200, { "Content-Type": "text/xml" });
+  return res.end(twiml.toString());
+}
+
+// Gratitude responses
+if (intent === "gratitude") {
+  const twiml = new MessagingResponse();
+  twiml.message("😊 You're very welcome!");
+
+  res.writeHead(200, { "Content-Type": "text/xml" });
+  return res.end(twiml.toString());
+}
+
+if (isDailyLimited(user))
+  return res.send(`<Response><Message>Daily limit reached.</Message></Response>`);
+
+if (isRateLimited(user))
+  return res.send(`<Response><Message>Please slow down.</Message></Response>`);
+
+if (needsClarification(msg))
+  return res.send(`<Response><Message>Please clarify your question.</Message></Response>`);
 
     updateUserProfile(user, msg);
 
