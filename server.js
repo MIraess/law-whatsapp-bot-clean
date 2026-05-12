@@ -54,9 +54,29 @@ function isGreeting(msg) {
 }
 function detectIntent(msg) {
   const m = normalize(msg);
+  function isCasualReply(msg) {
+  const m = normalize(msg);
+
+  return [
+    "good",
+    "fine",
+    "great",
+    "okay",
+    "ok",
+    "not bad",
+    "awesome",
+    "cool",
+    "nice",
+    "alright",
+    "i'm good",
+    "im good",
+    "doing well"
+  ].includes(m);
+}
 
   if (isGreeting(m)) return "greeting";
   if (isGratitude(m)) return "gratitude";
+  if (isCasualReply(m)) return "casual_reply";
 
   if (/\?$/.test(m)) return "question";
 
@@ -355,6 +375,23 @@ if (intent === "greeting") {
 if (intent === "gratitude") {
   const twiml = new MessagingResponse();
   twiml.message("😊 You're very welcome!");
+
+  res.writeHead(200, { "Content-Type": "text/xml" });
+  return res.end(twiml.toString());
+}
+if (intent === "casual_reply") {
+  const replies = [
+    "😊 Glad to hear that!",
+    "Nice 😄 Hope the rest of your day goes well!",
+    "That's good 🌟",
+    "Awesome 🙌"
+  ];
+
+  const randomReply =
+    replies[Math.floor(Math.random() * replies.length)];
+
+  const twiml = new MessagingResponse();
+  twiml.message(randomReply);
 
   res.writeHead(200, { "Content-Type": "text/xml" });
   return res.end(twiml.toString());
