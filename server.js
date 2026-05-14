@@ -395,11 +395,11 @@ if (needsClarification(msg))
     updateUserProfile(user, msg);
   (async () =>{
     const casualIntents = [
-  "greeting",
-  "gratitude",
-  "casual_reply",
-  "casual"
-];
+      "greeting",
+      "gratitude",
+      "casual_reply",
+      "casual"
+    ];
 
 const twiml = new MessagingResponse();
 
