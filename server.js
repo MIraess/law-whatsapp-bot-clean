@@ -416,7 +416,9 @@ res.end(twiml.toString());
 setImmediate(async () => {
   try {
 
-    if (!conversations[user]) conversations[user] = [];
+    if (!conversations[user]) {
+      conversations[user] = [];
+    }
 
     conversations[user].push({
       role: "user",
@@ -444,11 +446,20 @@ setImmediate(async () => {
 
     let reply = ai.data.choices[0].message.content;
 
+    conversations[user].push({
+      role: "assistant",
+      content: reply
+    });
+
     const structured = extractFollowUp(reply);
 
     const chunks = chunkResponse(structured.reply);
 
-    await sendResponse(user, chunks, structured.followUp);
+    await sendResponse(
+      user,
+      chunks,
+      structured.followUp
+    );
 
   } catch (err) {
 
@@ -463,5 +474,34 @@ setImmediate(async () => {
       to: user,
     });
 
+  }
+});
+
+} catch (err) {
+
+  console.error(err.message);
+
+  const twiml = new MessagingResponse();
+
+  twiml.message("⚠️ Error occurred.");
+
+  res.writeHead(200, { "Content-Type": "text/xml" });
+
+  return res.end(twiml.toString());
+}
+
+});
+
+process.on("unhandledRejection", (err) => {
+  console.error("UNHANDLED REJECTION:", err);
+});
+
+process.on("uncaughtException", (err) => {
+  console.error("UNCAUGHT EXCEPTION:", err);
+});
+
+app.listen(3000, () => {
+  console.log("Server running");
+});
   }
 });
