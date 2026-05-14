@@ -176,33 +176,64 @@ function updateUserProfile(user, msg) {
   }
 }
 
-function buildPrompt(profile) {
+function buildPrompt(profile, intent) {
   let styleInstruction = "";
 
-  if (profile.prefersExam) {
-    styleInstruction = "Answer using IRAC (Issue, Rule, Application, Conclusion).";
-  } else if (profile.prefersSimple) {
-    styleInstruction = "Explain in very simple terms with relatable examples.";
-  } else {
-    styleInstruction = "Explain clearly and concisely.";
+  // Conversational mode
+  if (
+    intent === "greeting" ||
+    intent === "gratitude" ||
+    intent === "casual_reply" ||
+    intent === "casual"
+  ) {
+    styleInstruction = `
+You are a friendly, emotionally intelligent WhatsApp AI assistant.
+
+Reply naturally like a real human chatting casually.
+Keep responses short and conversational.
+Use light emojis naturally.
+Do NOT use Introduction, Explanation, Conclusion formatting.
+`;
+  }
+
+  // Academic mode
+  else if (profile.prefersExam) {
+    styleInstruction = `
+Answer using IRAC (Issue, Rule, Application, Conclusion).
+
+Structure as:
+Introduction
+Explanation
+Conclusion
+`;
+  }
+
+  // Simple explanation mode
+  else if (profile.prefersSimple) {
+    styleInstruction = `
+Explain in simple terms with relatable examples.
+
+Structure as:
+Introduction
+Explanation
+Conclusion
+`;
+  }
+
+  // Default
+  else {
+    styleInstruction = `
+Explain clearly and naturally.
+
+Use structured formatting only if the question is academic.
+`;
   }
 
   return {
     role: "system",
-    content: `
-${styleInstruction}
-
-Structure strictly as:
-Introduction
-Explanation
-Conclusion
-
-Use light emojis (⚖️📚).
-End with ONE follow-up question.
-    `,
+    content: styleInstruction,
   };
 }
-
 // ================= STAGE 4: VOICE =================
 // async function transcribeAudio(url, type) {
   // const audio = await axios.get(url, {
@@ -352,51 +383,6 @@ app.post("/webhook", async (req, res) => {
     // Detect intent
 const intent = detectIntent(msg);
 
-// Greeting responses
-if (intent === "greeting") {
-  const greetings = [
-    "Hey 😊 How’s your day going?",
-    "Hello 👋 Great to hear from you!",
-    "Good evening 🌆 Hope you're doing well!",
-    "Hi 😄 What can I help you with today?",
-  ];
-
-  const randomGreeting =
-    greetings[Math.floor(Math.random() * greetings.length)];
-
-  const twiml = new MessagingResponse();
-  twiml.message(randomGreeting);
-
-  res.writeHead(200, { "Content-Type": "text/xml" });
-  return res.end(twiml.toString());
-}
-
-// Gratitude responses
-if (intent === "gratitude") {
-  const twiml = new MessagingResponse();
-  twiml.message("😊 You're very welcome!");
-
-  res.writeHead(200, { "Content-Type": "text/xml" });
-  return res.end(twiml.toString());
-}
-if (intent === "casual_reply") {
-  const replies = [
-    "😊 Glad to hear that!",
-    "Nice 😄 Hope the rest of your day goes well!",
-    "That's good 🌟",
-    "Awesome 🙌"
-  ];
-
-  const randomReply =
-    replies[Math.floor(Math.random() * replies.length)];
-
-  const twiml = new MessagingResponse();
-  twiml.message(randomReply);
-
-  res.writeHead(200, { "Content-Type": "text/xml" });
-  return res.end(twiml.toString());
-}
-
 if (isDailyLimited(user))
   return res.send(`<Response><Message>Daily limit reached.</Message></Response>`);
 
@@ -422,7 +408,7 @@ if (needsClarification(msg))
         {
           model: "gpt-4o-mini",
           max_tokens: 900,
-          messages: [buildPrompt(profile), ...conversations[user].slice(-6)],
+          messages: [buildPrompt(profile, intent), ...conversations[user].slice(-6)],
         },
         {
           headers: {
