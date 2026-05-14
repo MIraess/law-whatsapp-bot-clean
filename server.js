@@ -394,114 +394,41 @@ if (needsClarification(msg))
   return res.send(`<Response><Message>Please clarify your question.</Message></Response>`);
 
     updateUserProfile(user, msg);
-// Decide whether to show "thinking" message
-const casualIntents = [
-  "greeting",
-  "gratitude",
-  "casual_reply",
-  "casual"
-];
+ res.send(`<Response><Message>⚖️ Let me think about that...</Message></Response>`);
 
-const twiml = new MessagingResponse();
+    // Async processing
+    (async () => {
+      if (!conversations[user]) conversations[user] = [];
+      conversations[user].push({ role: "user", content: msg });
 
-if (!casualIntents.includes(intent)) {
-  twiml.message("⚖️ Let me think about that...");
-}
+      const profile = userProfiles[user];
 
-// Send immediate webhook response to Twilio
-res.writeHead(200, { "Content-Type": "text/xml" });
-res.end(twiml.toString());
-
-// Continue AI processing AFTER response
-setImmediate(async () => {
-  try {
-
-    if (!conversations[user]) {
-      conversations[user] = [];
-    }
-
-    conversations[user].push({
-      role: "user",
-      content: msg
-    });
-
-    const profile = userProfiles[user];
-
-    const ai = await axios.post(
-      "https://api.openai.com/v1/chat/completions",
-      {
-        model: "gpt-4o-mini",
-        max_tokens: 900,
-        messages: [
-          buildPrompt(profile, intent),
-          ...conversations[user].slice(-6)
-        ],
-      },
-      {
-        headers: {
-          Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+      const ai = await axios.post(
+        "https://api.openai.com/v1/chat/completions",
+        {
+          model: "gpt-4o-mini",
+          max_tokens: 900,
+          messages: [buildPrompt(profile), ...conversations[user].slice(-6)],
         },
-      }
-    );
+        {
+          headers: {
+            Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+          },
+        }
+      );
 
-    let reply = ai.data.choices[0].message.content;
+      let reply = ai.data.choices[0].message.content;
 
-    conversations[user].push({
-      role: "assistant",
-      content: reply
-    });
+      const structured = extractFollowUp(reply);
+      const chunks = chunkResponse(structured.reply);
 
-    const structured = extractFollowUp(reply);
-
-    const chunks = chunkResponse(structured.reply);
-
-    await sendResponse(
-      user,
-      chunks,
-      structured.followUp
-    );
+      await sendResponse(user, chunks, structured.followUp);
+    })();
 
   } catch (err) {
-
-    console.error(
-      "ASYNC ERROR:",
-      err.response?.data || err.message
-    );
-
-    await client.messages.create({
-      body: "⚠️ Error processing your request.",
-      from: "whatsapp:+14155238886",
-      to: user,
-    });
-
+    console.error(err.message);
+    return res.send(`<Response><Message>Error occurred.</Message></Response>`);
   }
 });
 
-} catch (err) {
-
-  console.error(err.message);
-
-  const twiml = new MessagingResponse();
-
-  twiml.message("⚠️ Error occurred.");
-
-  res.writeHead(200, { "Content-Type": "text/xml" });
-
-  return res.end(twiml.toString());
-}
-
-});
-
-process.on("unhandledRejection", (err) => {
-  console.error("UNHANDLED REJECTION:", err);
-});
-
-process.on("uncaughtException", (err) => {
-  console.error("UNCAUGHT EXCEPTION:", err);
-});
-
-app.listen(3000, () => {
-  console.log("Server running");
-});
-  }
-});
+app.listen(3000, () => console.log("Server running"));
