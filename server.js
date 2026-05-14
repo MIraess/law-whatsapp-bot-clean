@@ -393,6 +393,25 @@ if (needsClarification(msg))
   return res.send(`<Response><Message>Please clarify your question.</Message></Response>`);
 
     updateUserProfile(user, msg);
+  (async () =>{
+    const casualIntents = [
+      "greeting",
+      "gratitude",
+      "casual_reply",
+      "casual"
+    ];
+
+if (!casualIntents.includes(intent)) {
+  const twiml = new MessagingResponse();
+  twiml.message("⚖️ Let me think about that...");
+
+  res.writeHead(200, { "Content-Type": "text/xml" });
+  res.end(twiml.toString());
+} else {
+  res.writeHead(200, { "Content-Type": "text/xml" });
+  res.end("<Response></Response>");
+}
+    })
 
     res.send(`<Response><Message>⚖️ Let me think about that...</Message></Response>`);
 
