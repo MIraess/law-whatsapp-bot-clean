@@ -413,7 +413,6 @@ if (!casualIntents.includes(intent)) {
 }
     })
 
-    res.send(`<Response><Message>⚖️ Let me think about that...</Message></Response>`);
 
     // Async processing
     (async () => {
