@@ -395,22 +395,20 @@ if (needsClarification(msg))
     updateUserProfile(user, msg);
   (async () =>{
     const casualIntents = [
-      "greeting",
-      "gratitude",
-      "casual_reply",
-      "casual"
-    ];
+  "greeting",
+  "gratitude",
+  "casual_reply",
+  "casual"
+];
 
-  if (!casualIntents.includes(intent)) {
-    const twiml = new MessagingResponse();
-    twiml.message("⚖️ Let me think about that...");
-  
-    res.writeHead(200, { "Content-Type": "text/xml" });
-    res.end(twiml.toString());
-  } else {
-    res.writeHead(200, { "Content-Type": "text/xml" });
-    res.end("<Response></Response>");
-  }
+const twiml = new MessagingResponse();
+
+if (!casualIntents.includes(intent)) {
+  twiml.message("⚖️ Let me think about that...");
+}
+
+res.writeHead(200, { "Content-Type": "text/xml" });
+res.end(twiml.toString());
 })
 
 
