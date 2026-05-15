@@ -74,6 +74,13 @@ function detectIntent(msg) {
     "doing well"
   ].includes(m);
 }
+  function wantsVoiceReply(msg) {
+  const m = normalize(msg);
+
+  return (
+    /voice note|voice reply|send voice|audio reply|reply with voice|read it out/i.test(m)
+  );
+}
 
   if (isGreeting(m)) return "greeting";
   if (isGratitude(m)) return "gratitude";
@@ -336,7 +343,7 @@ function chunkResponse(text) {
 }
 
 // ================= STAGE 6: DELIVERY =================
-async function sendResponse(user, chunks, followUp) {
+async function sendResponse(user, chunks, followUp, useVoice = false) {
   for (let part of chunks) {
     await client.messages.create({
       body: part,
@@ -344,15 +351,22 @@ async function sendResponse(user, chunks, followUp) {
       to: user,
     });
 
-    try {
-      const voiceUrl = await generateVoice(part);
-      await client.messages.create({
-        mediaUrl: [voiceUrl],
-        body: "🔊 Voice note",
-        from: "whatsapp:+14155238886",
-        to: user,
-      });
-    } catch {}
+if (useVoice) {
+  try {
+
+    const voiceUrl = await generateVoice(part);
+
+    await client.messages.create({
+      mediaUrl: [voiceUrl],
+      body: "🔊 Voice note",
+      from: "whatsapp:+14155238886",
+      to: user,
+    });
+
+  } catch (err) {
+    console.error("VOICE ERROR:", err.message);
+  }
+}
 
     await new Promise(r => setTimeout(r, 800));
   }
@@ -370,6 +384,9 @@ async function sendResponse(user, chunks, followUp) {
 app.post("/webhook", async (req, res) => {
   let msg = req.body.Body || "";
   const user = req.body.From;
+  const isVoiceMessage =
+  req.body.NumMedia &&
+  req.body.NumMedia !== "0";
 
   try {
     // Voice input
@@ -383,6 +400,8 @@ app.post("/webhook", async (req, res) => {
     // Priority responses
     // Detect intent
 const intent = detectIntent(msg);
+const useVoiceReply =
+  isVoiceMessage || wantsVoiceReply(msg);
 
 if (isDailyLimited(user))
   return res.send(`<Response><Message>Daily limit reached.</Message></Response>`);
@@ -433,7 +452,12 @@ if (casualIntents.includes(intent)) {
       const structured = extractFollowUp(reply);
       const chunks = chunkResponse(structured.reply);
 
-      await sendResponse(user, chunks, structured.followUp);
+      await sendResponse(
+        user,
+        chunks,
+        structured.followUp,
+        useVoiceReply
+      );
     })();
 
   } catch (err) {
