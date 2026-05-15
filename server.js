@@ -394,7 +394,18 @@ if (needsClarification(msg))
   return res.send(`<Response><Message>Please clarify your question.</Message></Response>`);
 
     updateUserProfile(user, msg);
- res.send(`<Response><Message>⚖️ Let me think about that...</Message></Response>`);
+ const casualIntents = [
+  "greeting",
+  "gratitude",
+  "casual_reply",
+  "casual"
+];
+
+if (casualIntents.includes(intent)) {
+  res.send("<Response></Response>");
+} else {
+  res.send(`<Response><Message>⚖️ Let me think about that...</Message></Response>`);
+}
 
     // Async processing
     (async () => {
