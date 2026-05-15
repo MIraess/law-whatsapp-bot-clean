@@ -236,74 +236,74 @@ Use structured formatting only if the question is academic.
   };
 }
 // ================= STAGE 4: VOICE =================
-// async function transcribeAudio(url, type) {
-  // const audio = await axios.get(url, {
-    //responseType: "arraybuffer",
-    //auth: {
-      //username: process.env.TWILIO_ACCOUNT_SID,
-      //password: process.env.TWILIO_AUTH_TOKEN,
-   // },
- // });
+ async function transcribeAudio(url, type) {
+   const audio = await axios.get(url, {
+    responseType: "arraybuffer",
+    auth: {
+      username: process.env.TWILIO_ACCOUNT_SID,
+      password: process.env.TWILIO_AUTH_TOKEN,
+    },
+  });
 
-  //const form = new FormData();
-  //form.append("file", audio.data, {
-    //filename: "audio.ogg",
-    //contentType: type || "audio/ogg",
-  //});
-  //form.append("model", "gpt-4o-mini-transcribe");
+  const form = new FormData();
+  form.append("file", audio.data, {
+    filename: "audio.ogg",
+    contentType: type || "audio/ogg",
+  });
+  form.append("model", "gpt-4o-mini-transcribe");
 
-  //const res = await axios.post(
-    //"https://api.openai.com/v1/audio/transcriptions",
-    //form,
-   // {
-     // headers: {
-       // ...form.getHeaders(),
-       // Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-     // },
-   // }
-  // );
+  const res = await axios.post(
+    "https://api.openai.com/v1/audio/transcriptions",
+    form,
+    {
+      headers: {
+        ...form.getHeaders(),
+        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+      },
+    }
+   );
 
- // return res.data.text;
-// }
+  return res.data.text;
+ }
 
-//async function generateVoice(text) {
- // try {
-   // const res = await axios.post(
-     // "https://api.openai.com/v1/audio/speech",
-     // {
-       // model: "gpt-4o-mini-tts",
-       // voice: "alloy",
-       // input: text,
-       // format: "mp3" // IMPORTANT
-     // },
-     // {
-       // headers: {
-         // Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-       // },
-       // responseType: "arraybuffer",
-     // }
-   // );
+async function generateVoice(text) {
+  try {
+    const res = await axios.post(
+      "https://api.openai.com/v1/audio/speech",
+      {
+        model: "gpt-4o-mini-tts",
+        voice: "alloy",
+        input: text,
+        format: "mp3" // IMPORTANT
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+        },
+        responseType: "arraybuffer",
+      }
+    );
 
-   // const tempPath = path.join(__dirname, `temp-${Date.now()}.mp3`);
-   // fs.writeFileSync(tempPath, res.data);
+    const tempPath = path.join(__dirname, `temp-${Date.now()}.mp3`);
+    fs.writeFileSync(tempPath, res.data);
 
-   // const upload = await cloudinary.uploader.upload(tempPath, {
-     // resource_type: "video",
-     // format: "mp3", // IMPORTANT
-     // public_id: `voice_${Date.now()}`
-   // });
+    const upload = await cloudinary.uploader.upload(tempPath, {
+      resource_type: "video",
+      format: "mp3", // IMPORTANT
+      public_id: `voice_${Date.now()}`
+    });
 
-   // fs.unlinkSync(tempPath);
+    fs.unlinkSync(tempPath);
 
-   // console.log("VOICE URL:", upload.secure_url);
+    console.log("VOICE URL:", upload.secure_url);
 
-   // return upload.secure_url;
+    return upload.secure_url;
 
- // } catch (err) {
-   // console.error("VOICE ERROR:", err.response?.data || err.message);
-   // throw err;
- // }
-// }
+  } catch (err) {
+    console.error("VOICE ERROR:", err.response?.data || err.message);
+    throw err;
+  }
+ }
 // ================= STAGE 5: RESPONSE STRUCTURE =================
 function extractFollowUp(reply) {
   let followUp = "";
