@@ -74,13 +74,6 @@ function detectIntent(msg) {
     "doing well"
   ].includes(m);
 }
-  function wantsVoiceReply(msg) {
-  const m = normalize(msg);
-
-  return (
-    /voice note|voice reply|send voice|audio reply|reply with voice|read it out/i.test(m)
-  );
-}
 
   if (isGreeting(m)) return "greeting";
   if (isGratitude(m)) return "gratitude";
@@ -104,6 +97,14 @@ function isGratitude(msg) {
 function hasOnlyEmoji(msg) {
   return /^[\p{Emoji}\s]+$/u.test(msg);
 }
+ function wantsVoiceReply(msg) {
+  const m = normalize(msg);
+
+  return (
+    /voice note|voice reply|send voice|audio reply|reply with voice|read it out/i.test(m)
+  );
+}
+
 
 // ================= STAGE 2: CONTROL LOGIC =================
 function needsClarification(msg) {
