@@ -105,6 +105,16 @@ function hasOnlyEmoji(msg) {
   );
 }
 
+function stripVoiceCommands(msg) {
+  return msg
+    .replace(/voice note/gi, "")
+    .replace(/voice reply/gi, "")
+    .replace(/send voice/gi, "")
+    .replace(/audio reply/gi, "")
+    .replace(/reply with voice/gi, "")
+    .replace(/read it out/gi, "")
+    .trim();
+}
 
 // ================= STAGE 2: CONTROL LOGIC =================
 function needsClarification(msg) {
@@ -403,6 +413,9 @@ app.post("/webhook", async (req, res) => {
 const intent = detectIntent(msg);
 const useVoiceReply =
   isVoiceMessage || wantsVoiceReply(msg);
+if (useVoiceReply){
+  msg = stripVoiceCommands(msg);
+}
 
 if (isDailyLimited(user))
   return res.send(`<Response><Message>Daily limit reached.</Message></Response>`);
