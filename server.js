@@ -323,6 +323,34 @@ async function generateVoice(text) {
   }
  }
 // ================= STAGE 5: RESPONSE STRUCTURE =================
+function generateSmartFollowUp(reply) {
+  const text = reply.toLowerCase();
+
+  // Legal / academic topics
+  if (
+    /law|constitution|section|court|case|rights|crime|contract|tort/.test(text)
+  ) {
+    const legalFollowUps = [
+      "⚖️ Would you like a practical example too?",
+      "📚 Should I explain this in simpler terms?",
+      "🧠 Would you like a case law example?",
+      "✍️ Do you want a summary for exam purposes?"
+    ];
+
+    return legalFollowUps[
+      Math.floor(Math.random() * legalFollowUps.length)
+    ];
+  }
+
+  // Emotional/supportive tone
+  if (/stress|sad|confused|hard|difficult/.test(text)) {
+    return "😊 Would you like me to break it down step by step?";
+  }
+
+  // Casual conversation
+  return "😄 Anything else you'd like to talk about?";
+}
+
 function extractFollowUp(reply) {
   let followUp = "";
   const matches = reply.match(/[^.?!]*\?/g);
@@ -331,7 +359,9 @@ function extractFollowUp(reply) {
     followUp = matches[matches.length - 1].trim();
     reply = reply.replace(followUp, "").trim();
   }
-
+  if (!followUp) {
+    followUp = generateSmartFollowUp(reply);
+  }
   return { reply, followUp };
 }
 
