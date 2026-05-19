@@ -27,6 +27,7 @@ cloudinary.config({
 // ================= STATE =================
 const conversations = {};
 const userProfiles = {};
+const pendingFollowUps = {};
 const userLimits = {};
 const dailyUsage = {};
 const DAILY_LIMIT = 20;
@@ -337,21 +338,29 @@ function generateSmartFollowUp(reply) {
       "✍️ Do you want a summary for exam purposes?"
     ];
 
-    return legalFollowUps[
-      Math.floor(Math.random() * legalFollowUps.length)
-    ];
+    return {
+  text: legalFollowUps[
+    Math.floor(Math.random() * legalFollowUps.length)
+  ],
+  type: "legal_followup"
+};
   }
 
   // Emotional/supportive tone
   if (/stress|sad|confused|hard|difficult/.test(text)) {
-    return "😊 Would you like me to break it down step by step?";
+    return {
+      text: "😊 Would you like me to break it down step by step?",
+      type: "explanation_followup"
+    };
   }
 
   // Casual conversation
-  return "😄 Anything else you'd like to talk about?";
+  return {
+    text: "😄 Anything else you'd like to talk about?",
+    type: "casual"
 }
 
-function extractFollowUp(reply) {
+function extractFollowUp(reply, user) {
   let followUp = "";
   const matches = reply.match(/[^.?!]*\?/g);
 
@@ -360,7 +369,9 @@ function extractFollowUp(reply) {
     reply = reply.replace(followUp, "").trim();
   }
   if (!followUp) {
-    followUp = generateSmartFollowUp(reply);
+    const smartFollowUp = generateSmartFollowUp(reply);
+    followUp = smartFollowUp.text;
+    pendingFollowUps [user] = smartFollowUp.type;
   }
   return { reply, followUp };
 }
@@ -441,6 +452,36 @@ app.post("/webhook", async (req, res) => {
     // Priority responses
     // Detect intent
 const intent = detectIntent(msg);
+const shortPositiveReplies = [
+  "yes",
+  "yes please",
+  "sure",
+  "okay",
+  "ok",
+  "please do"
+];
+
+if (
+  shortPositiveReplies.includes(normalize(msg)) &&
+  pendingFollowUps[user]
+) {
+
+  if (pendingFollowUps[user] === "legal_followup") {
+
+    msg =
+      "Please provide a relevant Nigerian case law example for the previous legal topic discussed.";
+
+  }
+
+  if (pendingFollowUps[user] === "explanation_followup") {
+
+    msg =
+      "Please explain the previous topic in simpler step-by-step terms.";
+
+  }
+
+  delete pendingFollowUps[user];
+}
 const useVoiceReply =
   isVoiceMessage || wantsVoiceReply(msg);
 if (useVoiceReply){
@@ -493,7 +534,7 @@ if (casualIntents.includes(intent)) {
 
       let reply = ai.data.choices[0].message.content;
 
-      const structured = extractFollowUp(reply);
+      const structured = extractFollowUp(reply, user);
       const chunks = chunkResponse(structured.reply);
 
       await sendResponse(
