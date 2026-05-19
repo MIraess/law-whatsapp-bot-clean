@@ -358,7 +358,7 @@ function generateSmartFollowUp(reply) {
   return {
     text: "😄 Anything else you'd like to talk about?",
     type: "casual"
-}
+};
 
 function extractFollowUp(reply, user) {
   let followUp = "";
