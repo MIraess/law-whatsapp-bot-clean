@@ -371,7 +371,7 @@ function extractFollowUp(reply, user) {
   if (!followUp) {
     const smartFollowUp = generateSmartFollowUp(reply);
     followUp = smartFollowUp.text;
-    pendingFollowUps [user] = smartFollowUp.type;
+    pendingFollowUps[user] = smartFollowUp.type;
   }
   return { reply, followUp };
 }
@@ -482,6 +482,7 @@ if (
 
   delete pendingFollowUps[user];
 }
+    
 const useVoiceReply =
   isVoiceMessage || wantsVoiceReply(msg);
 if (useVoiceReply){
