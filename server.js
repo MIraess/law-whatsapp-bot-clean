@@ -331,6 +331,7 @@ function generateSmartFollowUp(reply) {
   if (
     /law|constitution|section|court|case|rights|crime|contract|tort/.test(text)
   ) {
+
     const legalFollowUps = [
       "⚖️ Would you like a practical example too?",
       "📚 Should I explain this in simpler terms?",
@@ -339,13 +340,28 @@ function generateSmartFollowUp(reply) {
     ];
 
     return {
-  text: legalFollowUps[
-    Math.floor(Math.random() * legalFollowUps.length)
-  ],
-  type: "legal_followup"
-};
+      text: legalFollowUps[
+        Math.floor(Math.random() * legalFollowUps.length)
+      ],
+      type: "legal_followup"
+    };
   }
 
+  // Emotional/supportive tone
+  if (/stress|sad|confused|hard|difficult/.test(text)) {
+
+    return {
+      text: "😊 Would you like me to break it down step by step?",
+      type: "explanation_followup"
+    };
+  }
+
+  // Casual conversation
+  return {
+    text: "😄 Anything else you'd like to talk about?",
+    type: "casual"
+  };
+}
   // Emotional/supportive tone
   if (/stress|sad|confused|hard|difficult/.test(text)) {
     return {
@@ -552,4 +568,4 @@ if (casualIntents.includes(intent)) {
   }
 });
 
-app.listen(3000, () => console.log("Server running"));}
+app.listen(3000, () => console.log("Server running"));
