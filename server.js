@@ -362,20 +362,6 @@ function generateSmartFollowUp(reply) {
     type: "casual"
   };
 }
-  // Emotional/supportive tone
-  if (/stress|sad|confused|hard|difficult/.test(text)) {
-    return {
-      text: "😊 Would you like me to break it down step by step?",
-      type: "explanation_followup"
-    };
-  }
-
-  // Casual conversation
-  return {
-    text: "😄 Anything else you'd like to talk about?",
-    type: "casual"
-};
-
 function extractFollowUp(reply, user) {
   let followUp = "";
   const matches = reply.match(/[^.?!]*\?/g);
