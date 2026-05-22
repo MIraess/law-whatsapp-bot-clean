@@ -7,6 +7,7 @@ const FormData = require("form-data");
 const cloudinary = require("cloudinary").v2;
 const fs = require("fs");
 const path = require("path");
+const constitution = require ("./consttitution.json");
 
 const app = express();
 app.use(express.urlencoded({ extended: true }));
@@ -53,6 +54,14 @@ function isGreeting(msg) {
     /(good morning|good afternoon|good evening)/.test(m) ||
     /(how are you|how far|what's up|wassup)/.test(m)
   );
+}
+function detectConstitutionSection(msg) {
+
+  const match = msg.match(/section\s+(\d+)/i);
+
+  if (!match) return null;
+
+  return match[1];
 }
 function detectIntent(msg) {
   const m = normalize(msg);
@@ -507,6 +516,27 @@ if (needsClarification(msg))
   "casual_reply",
   "casual"
 ];
+
+const requestedSection =
+  detectConstitutionSection(msg);
+
+if (
+  requestedSection &&
+  constitution[requestedSection]
+) {
+
+  const sectionData =
+    constitution[requestedSection];
+
+  msg = `
+Explain this constitutional provision in simple Nigerian legal terms:
+
+Section ${requestedSection}
+${sectionData.title}
+
+"${sectionData.text}"
+  `;
+}
 
 if (casualIntents.includes(intent)) {
   res.send("<Response></Response>");
