@@ -7,7 +7,7 @@ const FormData = require("form-data");
 const cloudinary = require("cloudinary").v2;
 const fs = require("fs");
 const path = require("path");
-const constitution = require ("./consttitution.json");
+const constitution = require ("./constitution.json");
 
 const app = express();
 app.use(express.urlencoded({ extended: true }));
