@@ -1,56 +1,38 @@
 const fs = require("fs");
-const pdf = require("pdf-parse");
 
-async function parseConstitution() {
-
-  const dataBuffer = fs.readFileSync(
-    "./constitution-of-the-federal-republic-of-nigeria.pdf"
-  );
-
-  const data = await pdf(dataBuffer);
-
-  const text = data.text;
-
-  // Match sections like:
-  // "33. Right to life"
-  const sectionRegex =
-  /(\d+)\.\s*([^\n]+)\n([\s\S]*?)(?=\n\s*\d+\.\s*[^\n]+|\Z)/g;
+function parseConstitution() {
+  const text = fs.readFileSync("rawText.txt", "utf8");
 
   const constitution = {};
 
+  // Match ONLY actual section headings
+  const regex = /Section\s+(\d+)\.\s([\s\S]*?)(?=Section\s+\d+\.|$)/g;
+
   let match;
 
-  while ((match = sectionRegex.exec(text)) !== null) {
-
+  while ((match = regex.exec(text)) !== null) {
     const sectionNumber = match[1];
+    const sectionContent = match[2].trim();
 
-    const title = match[2].trim();
-
-    const sectionText = match[3]
-      .replace(/\s+/g, " ")
-      .trim();
-
-    constitution[sectionNumber] = {
-      title,
-      keywords: [
-        title.toLowerCase()
-      ],
-      text: sectionText
-    };
+    constitution[sectionNumber] = sectionContent;
   }
 
   fs.writeFileSync(
-    "./constitution.json",
+    "constitution.json",
     JSON.stringify(constitution, null, 2)
   );
 
   console.log(
-    "Constitution JSON generated successfully!"
+    `Constitution JSON generated successfully!\nExtracted ${
+      Object.keys(constitution).length
+    } sections.`
   );
 
-  console.log(
-    `Extracted ${Object.keys(constitution).length} sections.`
-  );
+  console.log("\nSECTION 33:\n");
+  console.log(constitution["33"]?.slice(0, 500));
+
+  console.log("\nSECTION 44:\n");
+  console.log(constitution["44"]?.slice(0, 500));
 }
 
 parseConstitution();

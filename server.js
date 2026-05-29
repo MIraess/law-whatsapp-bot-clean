@@ -526,16 +526,19 @@ if (
 ) {
 
   const sectionData =
-    constitution[requestedSection];
+  constitution[requestedSection];
 
-  msg = `
-Explain this constitutional provision in simple Nigerian legal terms:
+msg = `
+You are a Nigerian legal assistant.
+
+First quote the constitutional provision exactly as provided.
+
+Then explain it in simple Nigerian legal terms.
 
 Section ${requestedSection}
-${sectionData.title}
 
-"${sectionData.text}"
-  `;
+${sectionData}
+`;
 }
 
 if (casualIntents.includes(intent)) {
