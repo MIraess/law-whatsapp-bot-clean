@@ -8,6 +8,9 @@ const cloudinary = require("cloudinary").v2;
 const fs = require("fs");
 const path = require("path");
 const constitution = require ("./constitution.json");
+const {
+  processLegalQuery
+} = require("./services/legalAssistant");
 
 const app = express();
 app.use(express.urlencoded({ extended: true }));
@@ -584,6 +587,26 @@ if (casualIntents.includes(intent)) {
   } catch (err) {
     console.error(err.message);
     return res.send(`<Response><Message>Error occurred.</Message></Response>`);
+  }
+});
+app.post("/test-chat", async (req, res) => {
+  try {
+
+    const result = await processLegalQuery(
+      req.body.message,
+      "test-user"
+    );
+
+    res.json(result);
+
+  } catch (err) {
+
+    console.error(err);
+
+    res.status(500).json({
+      error: err.message
+    });
+
   }
 });
 
