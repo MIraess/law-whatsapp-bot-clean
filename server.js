@@ -589,16 +589,15 @@ if (casualIntents.includes(intent)) {
     return res.send(`<Response><Message>Error occurred.</Message></Response>`);
   }
 });
-app.post("/test-chat", async (req, res) => {
-
-  console.log("TEST CHAT HIT");
+app.post("/api/chat", async (req, res) => {
 
   try {
 
-    const result = await processLegalQuery(
-      req.body.message,
-      "test-user"
-    );
+    const result =
+      await processLegalQuery(
+        req.body.message,
+        req.body.sessionId || "guest"
+      );
 
     res.json(result);
 
@@ -611,6 +610,6 @@ app.post("/test-chat", async (req, res) => {
     });
 
   }
-});
 
+});
 app.listen(3000, () => console.log("Server running"));
