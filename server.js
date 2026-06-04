@@ -590,6 +590,9 @@ if (casualIntents.includes(intent)) {
   }
 });
 app.post("/test-chat", async (req, res) => {
+
+  console.log("TEST CHAT HIT");
+
   try {
 
     const result = await processLegalQuery(
