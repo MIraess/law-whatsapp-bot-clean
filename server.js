@@ -1,6 +1,7 @@
 require("dotenv").config();
 const express = require("express");
 const axios = require("axios");
+const cors = require("cors");
 const twilio = require("twilio");
 const MessagingResponse = twilio.twiml.MessagingResponse;
 const FormData = require("form-data");
@@ -13,6 +14,7 @@ const {
 } = require("./services/legalAssistant");
 
 const app = express();
+app.use(cors());
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 
