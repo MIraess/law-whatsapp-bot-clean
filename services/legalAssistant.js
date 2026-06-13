@@ -155,7 +155,44 @@ async function processLegalQuery(
     detectIntent(message);
 
   let msg = message;
+  if (message.startsWith("QUIZ_JSON:")) {
 
+  const topic = message.replace(
+    "QUIZ_JSON:",
+    ""
+  );
+
+  msg = `
+Generate exactly 5 multiple choice questions on ${topic}.
+
+Return ONLY valid JSON.
+
+Format:
+
+{
+  "questions": [
+    {
+      "question": "Question text",
+      "options": {
+        "A": "Option A",
+        "B": "Option B",
+        "C": "Option C",
+        "D": "Option D"
+      },
+      "answer": "A"
+    }
+  ]
+}
+
+Rules:
+- Exactly 5 questions
+- Four options each
+- One correct answer
+- Return JSON only
+- No markdown
+- No explanations
+`;
+}
   const requestedSection =
     detectConstitutionSection(msg);
 
